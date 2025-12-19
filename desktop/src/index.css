@@ -1,0 +1,550 @@
+/**
+ * Creative Studio - 全局样式文件
+ *
+ * 这个文件包含：
+ * 1. Tailwind CSS导入
+ * 2. 全局重置样式
+ * 3. 自定义CSS类（按钮、输入框、导航等）
+ * 4. 滚动条样式
+ */
+
+/* ========================================
+ * Tailwind CSS 导入
+ * 这会引入所有Tailwind的基础样式和工具类
+ * ======================================== */
+@import "tailwindcss";
+
+/* ========================================
+ * CSS 变量系统 - Creative Studio 设计系统
+ * 基于 Material Design 3.0 原则，确保视觉一致性
+ * ======================================== */
+
+:root {
+  /* 表面色彩系统 */
+  --surface-primary: #f5f2ed;      /* 主背景色 */
+  --surface-secondary: #e8e3dc;    /* 次要表面色（标题栏/导航栏） */
+  --surface-tertiary: #ddd6cc;     /* 三级表面色 */
+  --surface-container: #faf8f5;    /* 容器背景色 */
+  
+  /* 品牌色彩系统 */
+  --primary-40: #8b6342;           /* 品牌主色 */
+  --primary-60: #6f4d34;           /* 品牌深色 */
+  --primary-80: #5d3f2a;           /* 品牌更深色 */
+  
+  /* 文本色彩系统 */
+  --on-surface: #38342e;           /* 表面文字色 */
+  --on-surface-variant: #5d554a;   /* 表面变体文字色 */
+  --on-surface-secondary: #7a6e5f; /* 次要文字色 */
+  
+  /* 边框和分割线 */
+  --outline: rgba(122, 110, 95, 0.2);  /* 边框色 */
+  --outline-variant: rgba(122, 110, 95, 0.15);  /* 变体边框色 */
+  
+  /* 状态层色彩 */
+  --state-layer-primary: rgba(139, 99, 66, 0.08);     /* 主色状态层 */
+  --state-layer-hover: rgba(139, 99, 66, 0.12);       /* 悬停状态层 */
+  --state-layer-pressed: rgba(139, 99, 66, 0.16);     /* 按下状态层 */
+  --state-layer-secondary: rgba(122, 110, 95, 0.08);  /* 次要状态层 */
+  --state-layer-secondary-hover: rgba(122, 110, 95, 0.12);  /* 次要悬停状态层 */
+  --state-layer-secondary-pressed: rgba(122, 110, 95, 0.16);  /* 次要按下状态层 */
+  
+  /* 投影系统 */
+  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.1), 0 0 1px rgba(0, 0, 0, 0.05);
+  --elevation-2: 0 2px 4px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
+  --elevation-3: 0 4px 8px rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.08);
+  
+  /* 尺寸系统 (基于8dp网格) */
+  --titlebar-height: 56px;        /* 标题栏高度 - 增大8px */
+  --navigation-width: 72px;       /* 导航栏宽度 */
+  --nav-item-size: 44px;          /* 导航项尺寸 */
+  --titlebar-button-size: 36px;   /* 标题栏按钮尺寸 - 增大4px */
+  
+  /* 过渡动画 */
+  --transition-fast: 0.15s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+}
+
+/* ========================================
+ * 全局重置
+ * ======================================== */
+
+/**
+ * 使用border-box盒模型
+ * 让padding和border包含在元素宽高内
+ * 使布局计算更直观
+ */
+* {
+  box-sizing: border-box;
+}
+
+/**
+ * body基础样式
+ * - 移除默认margin/padding
+ * - 隐藏溢出（Tauri应用不需要滚动）
+ * - 禁用文本选择（桌面应用体验）
+ * - 设置品牌背景色和文本色
+ */
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;          /* 防止窗口级滚动 */
+  user-select: none;          /* 默认禁用选择，提升桌面应用体验 */
+  background-color: #faf8f5;  /* 温暖的米白色背景 */
+  color: #38342e;             /* 深棕色文本 */
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/**
+ * 可编辑元素样式
+ * contenteditable、输入框和文本域需要允许文本选择
+ */
+[contenteditable],
+input,
+textarea {
+  user-select: text;  /* 允许选择文本 */
+  cursor: text;       /* 显示文本光标 */
+}
+
+/* ========================================
+ * 自定义滚动条样式
+ * 仅适用于Webkit浏览器（Chrome、Edge、Safari）
+ * ======================================== */
+
+/**
+ * 滚动条整体
+ * 使用细滚动条提供更现代的外观
+ */
+::-webkit-scrollbar {
+  width: 6px;   /* 垂直滚动条宽度 */
+  height: 6px;  /* 水平滚动条高度 */
+}
+
+/**
+ * 滚动条轨道
+ * 使用透明背景，让滚动条不太突兀
+ */
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/**
+ * 滚动条滑块
+ * 使用品牌色系的中性棕色
+ */
+::-webkit-scrollbar-thumb {
+  background: #7a6e5f;   /* 棕灰色滑块 */
+  border-radius: 3px;    /* 圆角 */
+}
+
+/**
+ * 滚动条滑块悬停状态
+ * 让用户知道滚动条可交互
+ */
+::-webkit-scrollbar-thumb:hover {
+  background: #5d554a;   /* 悬停时变深 */
+}
+
+/* ========================================
+ * 导航项样式 (.nav-item)
+ * 用于：左侧导航栏的图标按钮
+ * 位置：AppNavigation组件
+ * ======================================== */
+
+/**
+ * 导航项基础样式
+ * 设计：方形图标按钮，带圆角和过渡动画
+ */
+.nav-item {
+  width: var(--nav-item-size);              /* 使用CSS变量 */
+  height: var(--nav-item-size);             /* 使用CSS变量 */
+  display: flex;            /* 弹性布局 */
+  align-items: center;      /* 垂直居中 */
+  justify-content: center;  /* 水平居中 */
+  border-radius: 12px;      /* 圆角 */
+  color: var(--on-surface-secondary);  /* 使用CSS变量 */
+  background-color: transparent;  /* 透明背景 */
+  margin-bottom: 8px;       /* 按钮间距 */
+  cursor: pointer;          /* 鼠标指针 */
+  transition: all var(--transition-normal);  /* 使用CSS变量 */
+  border: none;             /* 移除默认边框 */
+}
+
+/**
+ * 导航项悬停状态
+ * 提供视觉反馈，表明可点击
+ */
+.nav-item:hover {
+  background-color: var(--state-layer-hover);  /* 使用CSS变量 */
+  color: var(--primary-40);           /* 使用CSS变量 */
+  transform: scale(1.05);   /* 轻微放大效果 */
+}
+
+/**
+ * 导航项激活状态
+ * 用于标识当前选中的视图
+ */
+.nav-item.active {
+  background-color: var(--state-layer-pressed);  /* 使用CSS变量 */
+  color: var(--primary-40);           /* 使用CSS变量 */
+  box-shadow: var(--elevation-2);     /* 使用CSS变量投影系统 */
+}
+
+/* ========================================
+ * 按钮样式 (.btn, .btn-primary)
+ * 用于：全局按钮组件
+ * 位置：WriterView、SettingsView等
+ * ======================================== */
+
+/**
+ * 按钮基础样式
+ * 设计：扁平化现代按钮，无边框，半透明背景
+ */
+.btn {
+  display: inline-flex;     /* 内联弹性布局 */
+  align-items: center;      /* 垂直居中 */
+  gap: 0.5rem;             /* 图标和文字间距 */
+  padding: 0.5rem 1.25rem; /* 内边距 */
+  border-radius: 0.625rem; /* 圆角 */
+  font-size: 0.875rem;     /* 14px字体 */
+  font-weight: 500;        /* 中等粗细 */
+  border: none;            /* 无边框 */
+  background-color: rgba(122, 110, 95, 0.08);  /* 半透明背景 */
+  color: #5d554a;          /* 中性棕色文字 */
+  cursor: pointer;         /* 指针光标 */
+  transition: all 0.15s ease;  /* 平滑过渡 */
+}
+
+/**
+ * 按钮悬停状态
+ * 背景加深，文字变深
+ */
+.btn:hover {
+  background-color: rgba(122, 110, 95, 0.15);  /* 加深背景 */
+  color: #38342e;          /* 深色文字 */
+}
+
+/**
+ * 按钮按下状态
+ * 背景更深，提供按压反馈
+ */
+.btn:active {
+  background-color: rgba(122, 110, 95, 0.2);  /* 更深背景 */
+  transform: scale(0.98);  /* 轻微缩小 */
+}
+
+/**
+ * 主要按钮样式
+ * 设计：品牌色实色背景，扁平化设计
+ */
+.btn-primary {
+  background-color: #8b6342;  /* 品牌色背景 */
+  color: white;               /* 白色文字 */
+  border: none;               /* 无边框 */
+}
+
+/**
+ * 主要按钮悬停状态
+ * 背景变深
+ */
+.btn-primary:hover {
+  background-color: #6f4d34;  /* 深色背景 */
+}
+
+/**
+ * 主要按钮按下状态
+ */
+.btn-primary:active {
+  background-color: #5d3f2a;  /* 更深背景 */
+  transform: scale(0.98);     /* 轻微缩小 */
+}
+
+/* ========================================
+ * 表单输入框样式 (.form-input)
+ * 用于：文本输入框、下拉选择框
+ * 位置：WriterView、SettingsView
+ * ======================================== */
+
+/**
+ * 输入框基础样式
+ * 设计：扁平化输入框，半透明背景，无边框
+ */
+.form-input {
+  width: 100%;             /* 全宽 */
+  padding: 0.625rem 1rem;  /* 内边距 */
+  border: none;            /* 无边框 */
+  border-radius: 0.625rem; /* 圆角 */
+  font-size: 0.875rem;     /* 14px字体 */
+  background-color: rgba(122, 110, 95, 0.08);  /* 半透明背景 */
+  color: #38342e;          /* 深色文字 */
+  transition: all 0.15s ease;  /* 平滑过渡 */
+  outline: none;           /* 移除默认轮廓 */
+}
+
+/**
+ * 输入框悬停状态
+ * 背景加深
+ */
+.form-input:hover {
+  background-color: rgba(122, 110, 95, 0.12);  /* 加深背景 */
+}
+
+/**
+ * 输入框焦点状态
+ * 品牌色外发光，不改变背景
+ */
+.form-input:focus {
+  box-shadow: 0 0 0 2px rgba(139, 99, 66, 0.2);  /* 品牌色外发光 */
+}
+
+/**
+ * 输入框占位符样式
+ * 使用较浅的文字颜色
+ */
+.form-input::placeholder {
+  color: #9a8c79;  /* 中性灰色 */
+}
+
+/* ========================================
+ * 树形列表项样式 (.tree-item)
+ * 用于：侧边栏的文件/章节列表
+ * 位置：WriterView侧边栏
+ * ======================================== */
+
+/**
+ * 树形项基础样式
+ * 设计：带图标的列表项，支持选中状态
+ */
+.tree-item {
+  display: flex;           /* 弹性布局 */
+  align-items: center;     /* 垂直居中 */
+  gap: 0.5rem;            /* 图标和文字间距 */
+  padding: 0.5rem 0.75rem;  /* 内边距 */
+  border-radius: 0.5rem;  /* 圆角 */
+  font-size: 0.875rem;    /* 14px字体 */
+  color: #5d554a;         /* 中性棕色 */
+  background-color: transparent;  /* 透明背景 */
+  cursor: pointer;        /* 指针光标 */
+  transition: all 0.2s ease;  /* 平滑过渡 */
+  border: none;           /* 无边框 */
+  width: 100%;            /* 全宽 */
+  text-align: left;       /* 左对齐文字 */
+}
+
+/**
+ * 树形项悬停状态
+ * 背景变色，文字变深
+ */
+.tree-item:hover {
+  background-color: rgba(139, 99, 66, 0.08);  /* 浅色品牌背景 */
+  color: #38342e;         /* 深色文字 */
+}
+
+/**
+ * 树形项激活状态
+ * 用于标识当前选中的项目
+ */
+.tree-item.active {
+  background-color: rgba(139, 99, 66, 0.15);  /* 品牌背景 */
+  color: #8b6342;         /* 品牌色文字 */
+  font-weight: 500;       /* 中等粗细 */
+}
+
+/* ========================================
+ * 编辑器工具栏样式 (.toolbar-btn, .toolbar-btn-text, .toolbar-select)
+ * 用于：编辑器顶部的格式化工具栏
+ * 位置：WriterView编辑器
+ * ======================================== */
+
+/**
+ * 工具栏图标按钮样式
+ * 设计：小型正方形按钮，仅包含图标
+ */
+.toolbar-btn {
+  width: 32px;               /* 固定宽度 */
+  height: 32px;              /* 固定高度（正方形） */
+  display: flex;             /* 弹性布局 */
+  align-items: center;       /* 垂直居中 */
+  justify-content: center;   /* 水平居中 */
+  border-radius: 6px;        /* 圆角 */
+  color: #5d554a;           /* 默认图标颜色 */
+  background-color: transparent;  /* 透明背景 */
+  cursor: pointer;           /* 鼠标指针 */
+  transition: all 0.15s ease;  /* 平滑过渡 */
+  border: none;              /* 移除默认边框 */
+}
+
+/**
+ * 工具栏按钮悬停状态
+ */
+.toolbar-btn:hover {
+  background-color: rgba(139, 99, 66, 0.08);  /* 浅色品牌背景 */
+  color: #8b6342;            /* 品牌色图标 */
+}
+
+/**
+ * 工具栏按钮激活状态（已应用的格式）
+ */
+.toolbar-btn.active {
+  background-color: rgba(139, 99, 66, 0.15);  /* 品牌背景 */
+  color: #8b6342;            /* 品牌色图标 */
+}
+
+/**
+ * 工具栏按钮按下状态
+ */
+.toolbar-btn:active {
+  background-color: rgba(139, 99, 66, 0.2);  /* 更深背景 */
+  transform: scale(0.95);    /* 轻微缩小 */
+}
+
+/**
+ * 工具栏文字按钮样式
+ * 设计：包含图标和文字的按钮，用于专用工具
+ */
+.toolbar-btn-text {
+  display: flex;             /* 弹性布局 */
+  align-items: center;       /* 垂直居中 */
+  justify-content: center;   /* 水平居中 */
+  gap: 4px;                  /* 图标和文字间距 */
+  padding: 6px 10px;         /* 内边距 */
+  border-radius: 6px;        /* 圆角 */
+  color: #5d554a;           /* 默认颜色 */
+  background-color: transparent;  /* 透明背景 */
+  cursor: pointer;           /* 鼠标指针 */
+  transition: all 0.15s ease;  /* 平滑过渡 */
+  border: none;              /* 移除默认边框 */
+  white-space: nowrap;       /* 不换行 */
+}
+
+/**
+ * 工具栏文字按钮悬停状态
+ */
+.toolbar-btn-text:hover {
+  background-color: rgba(139, 99, 66, 0.08);  /* 浅色品牌背景 */
+  color: #8b6342;            /* 品牌色 */
+}
+
+/**
+ * 工具栏文字按钮按下状态
+ */
+.toolbar-btn-text:active {
+  background-color: rgba(139, 99, 66, 0.2);  /* 更深背景 */
+  transform: scale(0.95);    /* 轻微缩小 */
+}
+
+/**
+ * 工具栏下拉选择框样式
+ */
+.toolbar-select {
+  height: 32px;              /* 固定高度 */
+  padding: 0 8px;            /* 内边距 */
+  border: none;              /* 无边框 */
+  border-radius: 6px;        /* 圆角 */
+  font-size: 0.813rem;       /* 13px字体 */
+  background-color: rgba(122, 110, 95, 0.08);  /* 半透明背景 */
+  color: #38342e;            /* 深色文字 */
+  cursor: pointer;           /* 指针光标 */
+  transition: all 0.15s ease;  /* 平滑过渡 */
+  outline: none;             /* 移除默认轮廓 */
+}
+
+/**
+ * 工具栏下拉选择框悬停状态
+ */
+.toolbar-select:hover {
+  background-color: rgba(122, 110, 95, 0.12);  /* 加深背景 */
+}
+
+/**
+ * 工具栏下拉选择框焦点状态
+ */
+.toolbar-select:focus {
+  box-shadow: 0 0 0 2px rgba(139, 99, 66, 0.2);  /* 品牌色外发光 */
+}
+
+/* ========================================
+ * 标题栏按钮样式 (.titlebar-button)
+ * 用于：自定义窗口标题栏的控制按钮
+ * 位置：TitleBar组件
+ * ======================================== */
+
+/**
+ * 标题栏按钮基础样式
+ * 设计：小巧的方形按钮，与标题栏高度匹配
+ */
+.titlebar-button {
+  width: var(--titlebar-button-size);  /* 使用CSS变量 */
+  height: 32px;                        /* 增大高度 */
+  display: flex;            /* 弹性布局 */
+  align-items: center;      /* 垂直居中 */
+  justify-content: center;  /* 水平居中 */
+  border-radius: 6px;       /* 增大圆角 */
+  color: var(--on-surface-secondary);  /* 使用CSS变量 */
+  background-color: transparent;  /* 透明背景 */
+  border: none;             /* 无边框 */
+  cursor: pointer;          /* 指针光标 */
+  transition: all var(--transition-fast);  /* 使用CSS变量 */
+}
+
+/**
+ * 标题栏按钮悬停状态
+ */
+.titlebar-button:hover {
+  background-color: var(--state-layer-secondary-hover);  /* 使用CSS变量 */
+  color: var(--on-surface-variant);           /* 使用CSS变量 */
+}
+
+/**
+ * 标题栏按钮按下状态
+ */
+.titlebar-button:active {
+  background-color: var(--state-layer-secondary-pressed);  /* 使用CSS变量 */
+  transform: scale(0.95);   /* 轻微缩小 */
+}
+
+/**
+ * 关闭按钮特殊样式
+ * 悬停时显示红色，符合用户习惯
+ */
+.titlebar-button-close:hover {
+  background-color: #e53935;  /* 红色背景 */
+  color: white;               /* 白色图标 */
+}
+
+/**
+ * 关闭按钮按下状态
+ */
+.titlebar-button-close:active {
+  background-color: #c62828;  /* 深红色 */
+}
+
+/* ========================================
+ * Tauri 拖拽区域样式
+ * 确保 data-tauri-drag-region 在 Tauri 2.0 中正常工作
+ * ======================================== */
+
+/**
+ * 拖拽区域基础样式
+ * 必须禁用文本选择，确保拖拽功能正常
+ */
+[data-tauri-drag-region] {
+  -webkit-user-select: none;     /* Safari/Chrome */
+  -moz-user-select: none;        /* Firefox */
+  -ms-user-select: none;         /* IE/Edge */
+  user-select: none;             /* 标准语法 */
+  -webkit-app-region: drag;      /* WebKit引擎（Electron兼容） */
+  app-region: drag;              /* 标准语法 */
+}
+
+/**
+ * 拖拽区域悬停时的光标样式
+ * 提供视觉反馈，表明该区域可拖拽
+ */
+[data-tauri-drag-region]:hover {
+  cursor: move;                  /* 移动光标 */
+}
+
+/* ========================================
+ * 样式文件结束
+ * ======================================== */

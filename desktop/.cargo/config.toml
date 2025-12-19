@@ -1,0 +1,16 @@
+# Cargo配置文件
+# 用于配置Windows交叉编译
+
+[target.x86_64-pc-windows-gnu]
+# 使用MinGW作为链接器
+linker = "x86_64-w64-mingw32-gcc"
+# 使用GNU AR工具
+ar = "x86_64-w64-mingw32-ar"
+
+# 环境变量配置
+[env]
+# 设置Windows版本为Windows 10（避免使用Windows 11的新API）
+CFLAGS = "-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -DLLAMA_SKIP_THREAD_PRIORITY=1"
+CXXFLAGS = "-D_WIN32_WINNT=0x0A00 -DWINVER=0x0A00 -std=c++17 -DLLAMA_SKIP_THREAD_PRIORITY=1"
+# 禁用llama.cpp的某些功能以避免兼容性问题
+LLAMA_SKIP_THREAD_PRIORITY = "1"
