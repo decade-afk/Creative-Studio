@@ -1,0 +1,85 @@
+<!--
+  Creative Studio Logo - 通用淡色写作编辑器风格
+
+  配色方案：
+  - 柔和的浅灰白背景，适合长时间使用
+  - 优雅的蓝灰色主体，专业而不失温度
+  - 中性配色，适配任何主题系统
+-->
+<svg
+width="48" height="48"
+  viewBox="0 0 48 48"
+  fill="none"
+  role="img"
+  aria-label="Compose"
+  xmlns="http://www.w3.org/2000/svg"
+  style="cursor:pointer; display:block;">
+  <defs>
+    <!-- 浅灰白背景渐变 -->
+    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8f9fa"/>
+      <stop offset="100%" stop-color="#e9ecef"/>
+    </linearGradient>
+    <!-- 钢笔主体 - 柔和的蓝灰色 -->
+    <linearGradient id="mainGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6c757d"/>
+      <stop offset="100%" stop-color="#495057"/>
+    </linearGradient>
+    <!-- C字母 - 温和的靛蓝色 -->
+    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c8db5"/>
+      <stop offset="100%" stop-color="#5b6d94"/>
+    </linearGradient>
+    <!-- 墨滴 - 深灰蓝 -->
+    <linearGradient id="inkGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#495057"/>
+      <stop offset="100%" stop-color="#343a40"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ☑️ 关键：添加透明 hover target（覆盖整个图标区域） -->
+  <rect width="48" height="48" fill="transparent" id="hoverTarget"/>
+
+  <!-- 背景 -->
+  <rect width="48" height="48" rx="12" fill="url(#bgGradient)"/>
+
+  <!-- 所有可动内容包裹在此组内 -->
+  <g id="iconRoot">
+    <!-- 反转 C（开口向右） -->
+    <g transform="translate(16,24)">
+      <path d="M 0 -7 Q -4 0 0 7"
+            stroke="url(#accentGradient)" stroke-width="4"
+            stroke-linecap="round" fill="none">
+        <!-- C 缩放动效：全局触发 -->
+        <animateTransform
+          attributeName="transform"
+          type="scale"
+          from="1" to="1.05"
+          dur="0.4s" fill="freeze"
+          begin="hoverTarget.mouseover"
+          end="hoverTarget.mouseout"/>
+      </path>
+    </g>
+
+    <!-- 钢笔 -->
+    <path d="M 28 11 L 34 23 L 28 27 L 22 23 Z" fill="url(#mainGradient)"/>
+    <rect x="26" y="19" width="4" height="8" fill="url(#mainGradient)" rx="1"/>
+
+    <!-- 墨滴 -->
+    <circle cx="28" cy="31" r="2.5" fill="url(#inkGradient)" opacity="0.9">
+      <!-- 下落 + 透明度联动 -->
+      <animate
+        attributeName="cy"
+        from="31" to="33"
+        dur="0.4s" fill="freeze"
+        begin="hoverTarget.mouseover"
+        end="hoverTarget.mouseout"/>
+      <animate
+        attributeName="opacity"
+        from="0.9" to="0.7"
+        dur="0.4s" fill="freeze"
+        begin="hoverTarget.mouseover"
+        end="hoverTarget.mouseout"/>
+    </circle>
+  </g>
+</svg>

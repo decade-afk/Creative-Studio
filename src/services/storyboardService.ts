@@ -4,7 +4,7 @@
  */
 
 import type { Storyboard } from '../types/storage';
-import { getDatabase, generateUUID, getCurrentTimestamp } from './database';
+import { getDatabase, generateUUID } from './database';
 
 /**
  * 获取指定作品的所有分镜

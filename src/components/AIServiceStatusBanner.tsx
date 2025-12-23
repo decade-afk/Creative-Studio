@@ -6,7 +6,7 @@
  */
 import { useState, useEffect } from 'react';
 import { ExclamationTriangleIcon, XMarkIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
-import { checkAIService, getAIStatus } from '../services/aiService';
+import { getAIStatus } from '../services/aiService';
 
 interface AIServiceStatusBannerProps {
   /** 是否允许关闭横幅 */

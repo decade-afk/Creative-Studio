@@ -12,7 +12,9 @@
  * Tailwind CSS 导入
  * 这会引入所有Tailwind的基础样式和工具类
  * ======================================== */
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* ========================================
  * CSS 变量系统 - Creative Studio 设计系统

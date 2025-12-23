@@ -14,7 +14,7 @@
  * - 章节内容使用HTML格式存储
  */
 
-import { getDatabase, generateUUID, getCurrentTimestamp } from './database';
+import { getDatabase, generateUUID, transaction, getCurrentTimestamp } from './database';
 import type { Chapter } from '../types/storage';
 
 /**
@@ -110,7 +110,7 @@ export async function getChaptersByWorkId(
     deleted: number;
   }>>(sql, [workId]);
 
-  const chapters: Chapter[] = rows.map(row => ({
+  const chapters: Chapter[] = rows.map((row: any) => ({
     id: row.id,
     work_id: row.work_id,
     title: row.title,
@@ -258,7 +258,7 @@ export async function reorderChapters(
 ): Promise<boolean> {
   try {
     // 使用事务批量更新章节顺序
-    await transaction(async (db) => {
+    await transaction(async (db: any) => {
       const timestamp = getCurrentTimestamp();
       for (let i = 0; i < chapterIds.length; i++) {
         await db.execute(

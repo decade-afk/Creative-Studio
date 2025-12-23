@@ -112,7 +112,7 @@ export async function getWorldSettings(workId: string): Promise<WorldSetting[]> 
       params: [workId]
     });
 
-    return result.map(row => ({
+    return result.map((row: any) => ({
       id: row.id,
       work_id: row.work_id,
       category: row.category,
@@ -145,7 +145,7 @@ export async function getWorldSettingsByCategory(
       params: [workId, category]
     });
 
-    return result.map(row => ({
+    return result.map((row: any) => ({
       id: row.id,
       work_id: row.work_id,
       category: row.category,
@@ -356,7 +356,7 @@ export async function searchWorldSettings(
       params: [workId, `%${searchText}%`]
     });
 
-    return result.map(row => ({
+    return result.map((row: any) => ({
       id: row.id,
       work_id: row.work_id,
       category: row.category,

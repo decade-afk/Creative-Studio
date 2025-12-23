@@ -1,0 +1,56 @@
+[package]
+name = "creative-studio-desktop"
+version = "0.1.0"
+description = "Creative Studio Desktop Application"
+authors = ["you"]
+license = "MIT"
+repository = ""
+edition = "2021"
+
+# Library configuration for Tauri
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "creative_studio_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri framework and plugins
+tauri = { version = "2", features = [] }
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-shell = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Loci AI Core - 本地 AI 推理引擎
+# 开发环境：使用本地路径依赖，支持快速迭代
+# 生产环境：切换为 git 依赖或发布的 crate
+loci = { path = "../../Loci" }
+
+# 异步运行时（Tauri 已包含，但 loci 回调可能需要）
+tokio = { version = "1", features = ["full"] }
+
+# 其他依赖（Desktop 特定功能）
+parking_lot = "0.12"    # 高性能锁（流式生成状态管理）
+uuid = { version = "1.19.0", features = ["v4"] }  # UUID 生成
+
+# 向量数据库（Vector Database）
+lancedb = "0.10"        # LanceDB 向量数据库客户端
+arrow = "53"            # Apache Arrow 数据格式
+arrow-array = "53"      # Arrow 数组操作
+arrow-schema = "53"     # Arrow Schema 定义
+
+# 文本嵌入和向量化（可选，如果需要本地嵌入）
+# fastembed = "3"       # 快速文本嵌入（可选）
+
+# 错误处理增强
+anyhow = "1.0"          # 简化错误处理

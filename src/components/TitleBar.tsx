@@ -68,7 +68,7 @@ export default function TitleBar({
     const unlisten = appWindow.listen('tauri://resize', checkMaximized);
 
     return () => {
-      unlisten.then(f => f());
+      unlisten.then((f: () => void) => f());
     };
   }, []);
 
@@ -85,7 +85,7 @@ export default function TitleBar({
     e.stopPropagation(); // ⚠️ 重要：阻止事件冒泡，防止触发拖拽
     console.log('最小化按钮被点击');
     const appWindow = getCurrentWindow();
-    appWindow.minimize().catch(err => console.error('最小化失败:', err));
+    appWindow.minimize().catch((err: unknown) => console.error('最小化失败:', err));
   };
 
   /**
@@ -99,7 +99,7 @@ export default function TitleBar({
     e.stopPropagation(); // ⚠️ 重要：阻止事件冒泡
     console.log('最大化按钮被点击');
     const appWindow = getCurrentWindow();
-    appWindow.toggleMaximize().catch(err => console.error('最大化失败:', err));
+    appWindow.toggleMaximize().catch((err: unknown) => console.error('最大化失败:', err));
   };
 
   /**
@@ -111,7 +111,7 @@ export default function TitleBar({
     e.stopPropagation(); // ⚠️ 重要：阻止事件冒泡
     console.log('关闭按钮被点击');
     const appWindow = getCurrentWindow();
-    appWindow.close().catch(err => console.error('关闭失败:', err));
+    appWindow.close().catch((err: unknown) => console.error('关闭失败:', err));
   };
 
   /**

@@ -105,7 +105,7 @@ export async function getWorks(type?: WorkType): Promise<Work[]> {
   }>>(sql, params);
 
   // 转换数据库行为Work对象
-  const works: Work[] = rows.map(row => ({
+  const works: Work[] = rows.map((row: any) => ({
     id: row.id,
     title: row.title,
     type: row.type as WorkType,
@@ -313,7 +313,7 @@ export async function getWorkStats(): Promise<{
   let scripts = 0;
   let novels = 0;
 
-  rows.forEach(row => {
+  rows.forEach((row: any) => {
     if (row.type === 'script') {
       scripts = row.count;
     } else if (row.type === 'novel') {

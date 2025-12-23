@@ -4,7 +4,7 @@
  */
 
 import type { Asset } from '../types/storage';
-import { getDatabase, generateUUID, getCurrentTimestamp } from './database';
+import { getDatabase, generateUUID } from './database';
 
 /**
  * 获取指定作品的所有素材
@@ -182,7 +182,7 @@ export async function searchAssetsByTag(workId: string, tag: string): Promise<As
   );
 
   // 在内存中过滤标签
-  return assets.filter((asset) => {
+  return assets.filter((asset: Asset) => {
     try {
       const tags = JSON.parse(asset.tags as any);
       return tags.includes(tag);
