@@ -92,6 +92,11 @@ export type AIWritingFunction =
 
 /**
  * 默认 AI 配置
+ *
+ * 模型路径配置说明:
+ * 1. 优先使用环境变量 CREATIVE_STUDIO_MODEL_PATH (如果设置)
+ * 2. 否则使用默认路径 D:/models/qwen-7b-q4.gguf (可根据实际修改)
+ * 3. 如果都不存在,用户需要在设置中手动配置
  */
 export const DEFAULT_AI_CONFIG: AIConfig = {
   model_path: '',

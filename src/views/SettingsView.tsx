@@ -16,6 +16,7 @@
 
 import { useState, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { AIConfig } from '../types/ai';
 import {
   getAIConfig,
@@ -25,6 +26,15 @@ import {
   isAIModelLoaded,
 } from '../services/aiService';
 import { useToast } from '../components/Toast';
+import { useTheme } from '../contexts/ThemeContext';
+import {
+  getUserProfile,
+  saveUserProfile,
+  selectAvatar,
+  validateEmail,
+  validateUsername,
+  type UserProfile,
+} from '../services/userService';
 
 // 设置选项卡类型
 type SettingsTab = 'profile' | 'ai' | 'appearance' | 'shortcuts' | 'about';
@@ -53,6 +63,16 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
   const [loadingModel, setLoadingModel] = useState(false);
   const { showToast, ToastComponent } = useToast();
 
+  // 主题相关
+  const { mode: themeMode, setMode: setThemeMode } = useTheme();
+
+  // 用户信息相关
+  const [userProfile, setUserProfile] = useState<UserProfile>({
+    username: '创作者',
+    email: '',
+  });
+  const [savingProfile, setSavingProfile] = useState(false);
+
   // 加载 AI 配置
   useEffect(() => {
     async function loadConfig() {
@@ -67,6 +87,19 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
       }
     }
     loadConfig();
+  }, []);
+
+  // 加载用户信息
+  useEffect(() => {
+    async function loadUserProfile() {
+      try {
+        const profile = await getUserProfile();
+        setUserProfile(profile);
+      } catch (error) {
+        console.error('加载用户信息失败:', error);
+      }
+    }
+    loadUserProfile();
   }, []);
 
   // 选择模型文件
@@ -131,6 +164,49 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
       showToast('模型已卸载', 'success');
     } catch (error: any) {
       showToast(`卸载失败: ${error}`, 'error');
+    }
+  };
+
+  // 上传头像
+  const handleUploadAvatar = async () => {
+    try {
+      const result = await selectAvatar();
+      if (result) {
+        setUserProfile({
+          ...userProfile,
+          avatarPath: result.path,
+          avatarData: result.data,
+        });
+        showToast('头像已更新', 'success');
+      }
+    } catch (error: any) {
+      showToast(`上传头像失败: ${error}`, 'error');
+    }
+  };
+
+  // 保存用户信息
+  const handleSaveUserProfile = async () => {
+    // 验证用户名
+    const usernameValidation = validateUsername(userProfile.username);
+    if (!usernameValidation.valid) {
+      showToast(usernameValidation.error || '用户名无效', 'error');
+      return;
+    }
+
+    // 验证邮箱
+    if (userProfile.email && !validateEmail(userProfile.email)) {
+      showToast('邮箱格式不正确', 'error');
+      return;
+    }
+
+    setSavingProfile(true);
+    try {
+      await saveUserProfile(userProfile);
+      showToast('用户信息已保存', 'success');
+    } catch (error: any) {
+      showToast(`保存失败: ${error}`, 'error');
+    } finally {
+      setSavingProfile(false);
     }
   };
 
@@ -261,10 +337,18 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                   <div className="mb-8 pb-8 border-b border-[#e5ddd2]">
                     <label className="block text-sm font-medium text-[#38342e] mb-4">头像</label>
                     <div className="flex items-center gap-6">
-                      <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary-400 to-accent-500 flex items-center justify-center text-white text-2xl font-bold">
-                        C
-                      </div>
-                      <button className="btn">
+                      {userProfile.avatarData ? (
+                        <img
+                          src={userProfile.avatarData.startsWith('data:') ? userProfile.avatarData : convertFileSrc(userProfile.avatarData)}
+                          alt="用户头像"
+                          className="w-20 h-20 rounded-full object-cover border-2 border-primary-200"
+                        />
+                      ) : (
+                        <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary-400 to-accent-500 flex items-center justify-center text-white text-2xl font-bold">
+                          {userProfile.username.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <button onClick={handleUploadAvatar} className="btn">
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
                         </svg>
@@ -280,9 +364,10 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                       type="text"
                       className="form-input max-w-md"
                       placeholder="输入用户名"
-                      defaultValue="创作者"
+                      value={userProfile.username}
+                      onChange={(e) => setUserProfile({ ...userProfile, username: e.target.value })}
                     />
-                    <p className="mt-2 text-sm text-[#9a8c79]">这将显示在您的作品中</p>
+                    <p className="mt-2 text-sm text-[#9a8c79]">这将显示在您的作品中（2-20个字符）</p>
                   </div>
 
                   {/* Email Section */}
@@ -292,8 +377,10 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                       type="email"
                       className="form-input max-w-md"
                       placeholder="your@email.com"
+                      value={userProfile.email}
+                      onChange={(e) => setUserProfile({ ...userProfile, email: e.target.value })}
                     />
-                    <p className="mt-2 text-sm text-[#9a8c79]">用于接收通知和找回密码</p>
+                    <p className="mt-2 text-sm text-[#9a8c79]">用于接收通知和找回密码（可选）</p>
                   </div>
                 </>
               )}
@@ -508,24 +595,53 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                   <label className="block text-sm font-medium text-[#38342e] mb-4">主题</label>
                   <div className="flex gap-4">
                     <label className="cursor-pointer">
-                      <input type="radio" name="theme" className="sr-only" defaultChecked />
-                      <div className="w-24 h-16 rounded-lg border-2 border-primary-500 bg-[#faf8f5] flex items-center justify-center text-sm font-medium text-[#38342e] shadow-sm">
+                      <input
+                        type="radio"
+                        name="theme"
+                        className="sr-only"
+                        checked={themeMode === 'light'}
+                        onChange={() => setThemeMode('light')}
+                      />
+                      <div className={`w-24 h-16 rounded-lg border-2 ${
+                        themeMode === 'light' ? 'border-primary-500' : 'border-[#e5ddd2]'
+                      } bg-[#faf8f5] flex items-center justify-center text-sm font-medium text-[#38342e] shadow-sm transition-all hover:border-primary-400`}>
                         浅色
                       </div>
                     </label>
                     <label className="cursor-pointer">
-                      <input type="radio" name="theme" className="sr-only" />
-                      <div className="w-24 h-16 rounded-lg border-2 border-[#e5ddd2] bg-[#1a1a1a] flex items-center justify-center text-sm font-medium text-white">
+                      <input
+                        type="radio"
+                        name="theme"
+                        className="sr-only"
+                        checked={themeMode === 'dark'}
+                        onChange={() => setThemeMode('dark')}
+                      />
+                      <div className={`w-24 h-16 rounded-lg border-2 ${
+                        themeMode === 'dark' ? 'border-primary-500' : 'border-[#e5ddd2]'
+                      } bg-[#1a1a1a] flex items-center justify-center text-sm font-medium text-white transition-all hover:border-primary-400`}>
                         深色
                       </div>
                     </label>
                     <label className="cursor-pointer">
-                      <input type="radio" name="theme" className="sr-only" />
-                      <div className="w-24 h-16 rounded-lg border-2 border-[#e5ddd2] bg-gradient-to-br from-[#1a1a1a] to-[#faf8f5] flex items-center justify-center text-sm font-medium text-[#7a6e5f]">
+                      <input
+                        type="radio"
+                        name="theme"
+                        className="sr-only"
+                        checked={themeMode === 'auto'}
+                        onChange={() => setThemeMode('auto')}
+                      />
+                      <div className={`w-24 h-16 rounded-lg border-2 ${
+                        themeMode === 'auto' ? 'border-primary-500' : 'border-[#e5ddd2]'
+                      } bg-gradient-to-br from-[#1a1a1a] to-[#faf8f5] flex items-center justify-center text-sm font-medium text-[#7a6e5f] transition-all hover:border-primary-400`}>
                         自动
                       </div>
                     </label>
                   </div>
+                  <p className="mt-4 text-sm text-[#9a8c79]">
+                    {themeMode === 'auto' && '跟随系统设置自动切换主题'}
+                    {themeMode === 'light' && '始终使用浅色主题'}
+                    {themeMode === 'dark' && '始终使用深色主题'}
+                  </p>
                 </div>
               )}
 
@@ -541,13 +657,90 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
 
               {/* 关于 Tab */}
               {activeTab === 'about' && (
-                <div className="text-center py-12">
-                  <div className="text-6xl mb-4">🎬</div>
-                  <h3 className="text-2xl font-bold text-[#38342e] mb-2">Creative Studio</h3>
-                  <p className="text-sm text-[#9a8c79] mb-6">版本 0.1.0 Beta</p>
-                  <p className="text-sm text-[#7a6e5f] max-w-md mx-auto">
-                    智能创作工作室，支持剧本创作、AI 辅助写作、分镜生成等功能
-                  </p>
+                <div className="py-8">
+                  <div className="text-center mb-10">
+                    <div className="text-6xl mb-4">🎬</div>
+                    <h3 className="text-2xl font-bold text-[#38342e] mb-2">Creative Studio</h3>
+                    <p className="text-sm text-[#9a8c79] mb-6">版本 0.1.0 Beta</p>
+                    <p className="text-sm text-[#7a6e5f] max-w-md mx-auto mb-8">
+                      智能创作工作室，支持剧本创作、AI 辅助写作、分镜生成等功能
+                    </p>
+                  </div>
+
+                  <div className="space-y-6 max-w-2xl mx-auto">
+                    {/* 技术栈 */}
+                    <div className="p-4 bg-primary-50 rounded-lg border border-primary-200">
+                      <h4 className="text-sm font-semibold text-[#38342e] mb-3">技术栈</h4>
+                      <div className="grid grid-cols-2 gap-3 text-sm text-[#7a6e5f]">
+                        <div className="flex items-center gap-2">
+                          <span className="text-primary-500">•</span>
+                          <span>Tauri 2.0 + Rust</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-primary-500">•</span>
+                          <span>React 18 + TypeScript</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-primary-500">•</span>
+                          <span>Loci (Local AI)</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-primary-500">•</span>
+                          <span>Tailwind CSS</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 功能特性 */}
+                    <div className="p-4 bg-accent-50 rounded-lg border border-accent-200">
+                      <h4 className="text-sm font-semibold text-[#38342e] mb-3">核心功能</h4>
+                      <div className="space-y-2 text-sm text-[#7a6e5f]">
+                        <div className="flex items-start gap-2">
+                          <span className="text-accent-500 mt-1">✓</span>
+                          <span>本地 AI 模型集成（支持 GGUF 格式）</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="text-accent-500 mt-1">✓</span>
+                          <span>剧本创作与管理</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="text-accent-500 mt-1">✓</span>
+                          <span>AI 辅助写作与润色</span>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="text-accent-500 mt-1">✓</span>
+                          <span>自定义主题（浅色/深色/自动）</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 链接 */}
+                    <div className="flex justify-center gap-4">
+                      <a
+                        href="https://github.com/anthropics/creative-studio-desktop"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn"
+                      >
+                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                        </svg>
+                        <span>GitHub</span>
+                      </a>
+                      <button className="btn">
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span>使用文档</span>
+                      </button>
+                    </div>
+
+                    {/* 版权信息 */}
+                    <div className="text-center text-xs text-[#9a8c79] pt-6 border-t border-[#e5ddd2]">
+                      <p>© 2025 Creative Studio. All rights reserved.</p>
+                      <p className="mt-1">Open source project under MIT License</p>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -564,9 +757,18 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
               </button>
             )}
             {activeTab === 'profile' && (
-              <button className="btn btn-primary">
-                保存更改
+              <button
+                onClick={handleSaveUserProfile}
+                disabled={savingProfile}
+                className="btn btn-primary"
+              >
+                {savingProfile ? '保存中...' : '保存更改'}
               </button>
+            )}
+            {activeTab === 'appearance' && (
+              <div className="text-sm text-[#7a6e5f]">
+                主题已自动保存
+              </div>
             )}
           </div>
         </div>

@@ -1,24 +1,23 @@
 /**
  * Creative Studio - 主应用组件
  *
- * 这是应用的根组件,负责:
- * 1. 管理主要视图切换(创作、规划、导演)
+ * 这是应用的根组件，负责：
+ * 1. 管理主要视图切换（创作、规划、导演）
  * 2. 控制设置面板的显示/隐藏
  * 3. 协调左侧导航栏和主内容区域的交互
  * 4. 管理标题栏状态和回调
- * 5. 显示 AI 配置对话框(优雅降级)
+ * 5. 显示 AI 服务状态横幅（优雅降级）
  */
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import TitleBar from './components/TitleBar';
 import AppNavigation from './components/AppNavigation';
-import AIConfigDialog from './components/AIConfigDialog';
+import AIServiceStatusBanner from './components/AIServiceStatusBanner';
 import WriterView from './views/WriterView';
 import DirectorView from './views/DirectorView';
 import PlannerView from './views/PlannerView';
 import SettingsView from './views/SettingsView';
-import { getAIStatus } from './services/aiService';
 
-// 定义视图类型:创作、规划、导演
+// 定义视图类型：创作、规划、导演
 type View = 'writer' | 'planner' | 'director';
 
 function App() {
@@ -26,45 +25,19 @@ function App() {
   const [currentView, setCurrentView] = useState<View>('writer');
   // 设置面板的显示状态
   const [showSettings, setShowSettings] = useState(false);
-  // AI 配置对话框状态
-  const [showAIConfigDialog, setShowAIConfigDialog] = useState(false);
   // WriterView 的侧边栏显示状态
   const [showWriterSidebar, setShowWriterSidebar] = useState(true);
-  // 当前文档名称(用于标题栏显示,暂时为空)
+  // 当前文档名称（用于标题栏显示，暂时为空）
   const currentDocumentName = '';
-
-  // 启动时检查 AI 配置
-  useEffect(() => {
-    checkAIConfigOnStartup();
-  }, []);
-
-  const checkAIConfigOnStartup = async () => {
-    try {
-      const status = await getAIStatus();
-
-      // 如果 AI 不可用,延迟 1.5 秒后显示配置对话框
-      if (!status.available) {
-        setTimeout(() => {
-          setShowAIConfigDialog(true);
-        }, 1500);
-      }
-    } catch (error) {
-      console.error('检查 AI 状态失败:', error);
-      // 如果检查失败,也显示配置对话框
-      setTimeout(() => {
-        setShowAIConfigDialog(true);
-      }, 1500);
-    }
-  };
 
   // 处理视图切换
   const handleViewChange = (view: View) => {
     if (view === 'writer') {
       if (currentView === 'writer') {
-        // 如果已经在创作页面,切换侧边栏状态
+        // 如果已经在创作页面，切换侧边栏状态
         setShowWriterSidebar(prev => !prev);
       } else {
-        // 从其他页面跳转到创作页面,固定显示侧边栏
+        // 从其他页面跳转到创作页面，固定显示侧边栏
         setShowWriterSidebar(true);
         setCurrentView(view);
       }
@@ -74,7 +47,7 @@ function App() {
     }
   };
 
-  // 标题栏菜单回调(暂时为占位符,功能由各视图内部处理)
+  // 标题栏菜单回调（暂时为占位符，功能由各视图内部处理）
   const handleNewWork = () => {
     console.log('新建作品功能暂由视图内部按钮触发');
   };
@@ -97,6 +70,9 @@ function App() {
         onExport={handleExport}
         onSettings={() => setShowSettings(true)}
       />
+
+      {/* AI Service Status Banner - 当AI不可用时显示 */}
+      <AIServiceStatusBanner dismissible={true} />
 
       {/* Main Application Area */}
       <div className="flex-1 flex overflow-hidden">
@@ -122,16 +98,6 @@ function App() {
 
       {/* Settings Modal */}
       {showSettings && <SettingsView onClose={() => setShowSettings(false)} />}
-
-      {/* AI Configuration Dialog - 首次启动或AI未配置时显示 */}
-      <AIConfigDialog
-        isOpen={showAIConfigDialog}
-        onClose={() => setShowAIConfigDialog(false)}
-        onConfigured={() => {
-          setShowAIConfigDialog(false);
-          // 可以在这里添加配置成功后的处理逻辑
-        }}
-      />
     </div>
   );
 }

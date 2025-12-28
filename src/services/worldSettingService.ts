@@ -1,6 +1,30 @@
+/**
+ * 世界观设定服务模块
+ *
+ * 功能说明:
+ * - 管理作品的世界观设定(地点、组织、事件、文化、科技、魔法等)
+ * - 提供 CRUD 操作(创建、读取、更新、删除)
+ * - 支持分类筛选和搜索功能
+ * - 管理设定之间的关联关系
+ *
+ * 数据结构:
+ * - 支持 6 种分类: location, organization, event, culture, technology, magic
+ * - 每个设定可关联角色和其他设定
+ * - 支持标签系统
+ * - 支持自定义图标和颜色
+ *
+ * @module worldSettingService
+ */
+
 import { invoke } from '@tauri-apps/api/core';
 
-// 导入 UUID 生成函数
+/**
+ * 生成符合 RFC 4122 v4 标准的 UUID
+ *
+ * @returns {string} UUID 字符串
+ * @example
+ * const id = generateUUID(); // "550e8400-e29b-41d4-a716-446655440000"
+ */
 function generateUUID(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
