@@ -17,8 +17,7 @@ use anyhow::{Context, Result};
 use arrow_array::{RecordBatch, RecordBatchIterator};
 use arrow_schema::{DataType, Field, Schema};
 use lancedb::connection::Connection;
-use lancedb::query::QueryBase;
-use lancedb::table::Table;
+use lancedb::query::{QueryBase, ExecutableQuery};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -159,10 +158,10 @@ impl VectorDatabase {
         let empty_batch = RecordBatch::new_empty(Arc::new(schema));
 
         // 创建表
-        conn.create_table(&self.table_name, Box::new(RecordBatchIterator::new(
+        conn.create_table(&self.table_name, RecordBatchIterator::new(
             vec![Ok(empty_batch)],
             Arc::new(Self::get_document_schema()),
-        )))
+        ))
         .execute()
         .await
         .context("Failed to create table")?;
@@ -203,7 +202,7 @@ impl VectorDatabase {
         let conn = conn_guard.as_ref().context("Database not initialized")?;
 
         // 获取表
-        let table = conn.open_table(&self.table_name)
+        let _table = conn.open_table(&self.table_name)
             .execute()
             .await
             .context("Failed to open table")?;
@@ -239,8 +238,8 @@ impl VectorDatabase {
             .context("Failed to open table")?;
 
         // 执行向量搜索
-        let results = table
-            .vector_search(&query_embedding)?
+        let _results = table
+            .vector_search(query_embedding)?
             .limit(limit)
             .execute()
             .await
@@ -264,7 +263,7 @@ impl VectorDatabase {
         let conn = conn_guard.as_ref().context("Database not initialized")?;
 
         // 获取表
-        let mut table = conn.open_table(&self.table_name)
+        let table = conn.open_table(&self.table_name)
             .execute()
             .await
             .context("Failed to open table")?;
@@ -326,7 +325,7 @@ pub struct DatabaseStats {
  * @param text 要嵌入的文本
  * @return 768 维向量
  */
-pub async fn generate_embedding(text: &str) -> Result<Vec<f32>> {
+pub async fn generate_embedding(_text: &str) -> Result<Vec<f32>> {
     // TODO: 实现真实的嵌入生成逻辑
     // 暂时返回随机向量作为占位符
     let embedding = vec![0.0; 768];

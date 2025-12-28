@@ -18,12 +18,14 @@ use std::sync::Arc;
 use std::collections::HashMap;
 use parking_lot::RwLock;
 use tokio::sync::watch;
-use tauri::Emitter;  // 用于 window.emit() 方法
 
-// 导入 Loci Core AI 引擎
-use loci::engine::{AIService, AIConfig, GenerateRequest, GenerateResponse, StreamEvent};
-
-// ========== 流式生成状态管理 ==========
+// 使用适配层
+mod loci_adapter;
+use loci_adapter::{
+    AIService, AIConfig, GenerateRequest, GenerateResponse,
+    AgentSystem, ModelConfig, AgentConfig, AgentGenerateRequest, AgentGenerateResponse, AgentTemplates,
+    get_system_info, recommend_model, SystemInfo, ModelRecommendation,
+};
 
 /**
  * 流式生成状态管理器
@@ -72,12 +74,6 @@ mod export;
 /// 向量数据库模块：处理语义搜索和向量存储
 mod vector_db;
 
-// 导入 Loci Core 模块
-use loci::agent::{
-    AgentSystem, ModelConfig, AgentConfig, AgentGenerateRequest, AgentGenerateResponse, AgentTemplates
-};
-use loci::sysinfo::{get_system_info, recommend_model, SystemInfo, ModelRecommendation};
-
 // ========== AI 服务相关命令 ==========
 
 /**
@@ -116,7 +112,8 @@ fn ai_update_config(
     service: tauri::State<Arc<AIService>>,
     config: AIConfig
 ) -> Result<(), String> {
-    service.update_config(config);
+    service.update_config(config)
+        .map_err(|e| format!("配置更新失败: {:?}", e))?;
     Ok(())
 }
 
@@ -308,13 +305,14 @@ async fn ai_generate(
     // 克隆 Arc 以移动到后台线程
     let service = service.inner().clone();
 
-    // 在后台线程执行推理（避免阻塞主线程）
+    // 在后台线程执行推理(避免阻塞主线程)
     // spawn_blocking 会在 Tokio 的阻塞线程池中执行
-    tokio::task::spawn_blocking(move || {
+    let result: Result<Result<GenerateResponse, String>, _> = tokio::task::spawn_blocking(move || -> Result<GenerateResponse, String> {
         service.generate(request)
     })
-    .await  // 等待后台任务完成
-    .map_err(|e| format!("推理任务失败: {:?}", e))?  // 处理 JoinError
+    .await; // 等待后台任务完成
+
+    result.map_err(|e| format!("推理任务失败: {:?}", e))?  // 处理 JoinError
 }
 
 /**
@@ -358,49 +356,13 @@ async fn ai_generate(
  */
 #[tauri::command]
 async fn ai_generate_stream(
-    service: tauri::State<'_, Arc<AIService>>,
-    stream_state: tauri::State<'_, Arc<StreamState>>,
-    window: tauri::Window,
-    request: GenerateRequest,
+    _service: tauri::State<'_, Arc<AIService>>,
+    _stream_state: tauri::State<'_, Arc<StreamState>>,
+    _window: tauri::Window,
+    _request: GenerateRequest,
 ) -> Result<String, String> {
-    use tokio::sync::watch;
-    use uuid::Uuid;
-
-    // 生成唯一的 session_id
-    let session_id = Uuid::new_v4().to_string();
-    
-    // 创建取消信号通道
-    let (cancel_tx, cancel_rx) = watch::channel(false);
-    
-    // 保存取消发送器
-    stream_state.add_session(session_id.clone(), cancel_tx);
-    
-    // 克隆必要的数据以移动到异步任务
-    let service = service.inner().clone();
-    let event_name = format!("ai-stream-{}", session_id);
-    let session_id_clone = session_id.clone();
-    let stream_state_clone = stream_state.inner().clone();
-    
-    // 在后台任务中执行流式生成
-    tokio::spawn(async move {
-        let result = service.generate_stream(
-            request,
-            |event| {
-                // 通过闭包发送事件到前端
-                let _ = window.emit(&event_name, event);
-            },
-            cancel_rx,
-        ).await;
-
-        // 生成完成后清理 session
-        stream_state_clone.remove_session(&session_id_clone);
-
-        if let Err(e) = result {
-            eprintln!("流式生成失败: {}", e);
-        }
-    });
-    
-    Ok(session_id)
+    // Streaming not supported by Loci engine yet
+    Err("流式生成暂未支持，请使用 ai_generate 代替".to_string())
 }
 
 /**
@@ -541,7 +503,7 @@ fn agent_get_agent(
     agent_system: tauri::State<'_, Arc<AgentSystem>>,
     agent_id: String
 ) -> Option<AgentConfig> {
-    agent_system.get_agent(&agent_id)
+    agent_system.get_agent(&agent_id).ok()
 }
 
 /**
@@ -593,11 +555,12 @@ async fn agent_generate(
     request: AgentGenerateRequest
 ) -> Result<AgentGenerateResponse, String> {
     let agent_system = agent_system.inner().clone();
-    tokio::task::spawn_blocking(move || {
+    let result: Result<Result<AgentGenerateResponse, String>, _> = tokio::task::spawn_blocking(move || -> Result<AgentGenerateResponse, String> {
         agent_system.generate(request)
     })
-    .await
-    .map_err(|e| format!("推理任务失败: {:?}", e))?
+    .await;
+
+    result.map_err(|e| format!("推理任务失败: {:?}", e))?
 }
 
 /**
@@ -894,9 +857,7 @@ pub fn run() {
     let ai_service = Arc::new(AIService::new());
 
     // 创建 Agent 系统实例
-    let agent_system = Arc::new(
-        AgentSystem::new().expect("初始化 Agent 系统失败")
-    );
+    let agent_system = Arc::new(AgentSystem::new());
 
     // 创建流式生成状态管理器
     let stream_state = Arc::new(StreamState::new());

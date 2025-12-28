@@ -42,12 +42,13 @@ tokio = { version = "1", features = ["full"] }
 # 其他依赖（Desktop 特定功能）
 parking_lot = "0.12"    # 高性能锁（流式生成状态管理）
 uuid = { version = "1.19.0", features = ["v4"] }  # UUID 生成
+num_cpus = "1.17"       # CPU 核心数检测
 
 # 向量数据库（Vector Database）
 lancedb = "0.10"        # LanceDB 向量数据库客户端
-arrow = "53"            # Apache Arrow 数据格式
-arrow-array = "53"      # Arrow 数组操作
-arrow-schema = "53"     # Arrow Schema 定义
+arrow = "52"            # Apache Arrow 数据格式 (匹配LanceDB版本)
+arrow-array = "52"      # Arrow 数组操作 (匹配LanceDB版本)
+arrow-schema = "52"     # Arrow Schema 定义 (匹配LanceDB版本)
 
 # 文本嵌入和向量化（可选，如果需要本地嵌入）
 # fastembed = "3"       # 快速文本嵌入（可选）

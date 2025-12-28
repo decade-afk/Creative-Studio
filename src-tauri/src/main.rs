@@ -10,5 +10,5 @@
 
 fn main() {
     // 调用lib.rs中的run函数启动应用
-    tauri_app_lib::run()
+    creative_studio_desktop_lib::run()
 }
