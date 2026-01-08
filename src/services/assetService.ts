@@ -7,19 +7,38 @@ import type { Asset } from '../types/storage';
 import { getDatabase, generateUUID } from './database';
 
 /**
+ * 数据库原始 Asset 类型（tags 为 JSON 字符串）
+ */
+interface RawAsset extends Omit<Asset, 'tags' | 'deleted'> {
+  tags: string;  // JSON 字符串
+  deleted: number;  // 0 或 1
+}
+
+/**
+ * 将数据库原始数据转换为应用层 Asset 类型
+ */
+function parseRawAsset(raw: RawAsset): Asset {
+  return {
+    ...raw,
+    tags: JSON.parse(raw.tags),
+    deleted: raw.deleted === 1,
+  };
+}
+
+/**
  * 获取指定作品的所有素材
  */
 export async function getAssetsByWorkId(workId: string): Promise<Asset[]> {
   const db = await getDatabase();
 
-  const assets = await db.select<Asset[]>(
+  const rawAssets = await db.select<RawAsset[]>(
     `SELECT * FROM assets
      WHERE work_id = ? AND deleted = 0
      ORDER BY created_at DESC`,
     [workId]
   );
 
-  return assets;
+  return rawAssets.map(parseRawAsset);
 }
 
 /**
@@ -28,12 +47,12 @@ export async function getAssetsByWorkId(workId: string): Promise<Asset[]> {
 export async function getAssetById(id: string): Promise<Asset | null> {
   const db = await getDatabase();
 
-  const assets = await db.select<Asset[]>(
+  const rawAssets = await db.select<RawAsset[]>(
     'SELECT * FROM assets WHERE id = ? AND deleted = 0',
     [id]
   );
 
-  return assets.length > 0 ? assets[0] : null;
+  return rawAssets.length > 0 ? parseRawAsset(rawAssets[0]) : null;
 }
 
 /**
@@ -158,14 +177,14 @@ export async function getAssetsByType(
 ): Promise<Asset[]> {
   const db = await getDatabase();
 
-  const assets = await db.select<Asset[]>(
+  const rawAssets = await db.select<RawAsset[]>(
     `SELECT * FROM assets
      WHERE work_id = ? AND type = ? AND deleted = 0
      ORDER BY created_at DESC`,
     [workId, type]
   );
 
-  return assets;
+  return rawAssets.map(parseRawAsset);
 }
 
 /**
@@ -174,22 +193,17 @@ export async function getAssetsByType(
 export async function searchAssetsByTag(workId: string, tag: string): Promise<Asset[]> {
   const db = await getDatabase();
 
-  const assets = await db.select<Asset[]>(
+  const rawAssets = await db.select<RawAsset[]>(
     `SELECT * FROM assets
      WHERE work_id = ? AND deleted = 0
      ORDER BY created_at DESC`,
     [workId]
   );
 
-  // 在内存中过滤标签
-  return assets.filter((asset: Asset) => {
-    try {
-      const tags = JSON.parse(asset.tags as any);
-      return tags.includes(tag);
-    } catch {
-      return false;
-    }
-  });
+  // 在内存中过滤标签（因为 SQLite 不支持 JSON 查询）
+  return rawAssets
+    .map(parseRawAsset)
+    .filter((asset: Asset) => asset.tags.includes(tag));
 }
 
 /**
@@ -198,14 +212,14 @@ export async function searchAssetsByTag(workId: string, tag: string): Promise<As
 export async function searchAssetsByName(workId: string, keyword: string): Promise<Asset[]> {
   const db = await getDatabase();
 
-  const assets = await db.select<Asset[]>(
+  const rawAssets = await db.select<RawAsset[]>(
     `SELECT * FROM assets
      WHERE work_id = ? AND name LIKE ? AND deleted = 0
      ORDER BY created_at DESC`,
     [workId, `%${keyword}%`]
   );
 
-  return assets;
+  return rawAssets.map(parseRawAsset);
 }
 
 /**

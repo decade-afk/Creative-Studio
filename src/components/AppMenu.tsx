@@ -1,13 +1,15 @@
 /**
  * AppMenu - 应用菜单组件
  *
- * 功能：
+ * 功能说明：
  * 1. 提供应用级别的菜单选项
  * 2. 文件、编辑、视图等常用菜单
  * 3. 下拉菜单交互
+ * 4. 显示快捷键提示（自动适配平台）
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { ShortcutPresets, formatShortcut } from '../hooks/useKeyboardShortcuts';
 
 interface MenuItem {
   label?: string;
@@ -27,9 +29,16 @@ interface AppMenuProps {
   onNewChapter?: () => void;
   onExport?: () => void;
   onSettings?: () => void;
+  onToggleSidebar?: () => void;
 }
 
-export default function AppMenu({ onNewWork, onNewChapter, onExport, onSettings }: AppMenuProps) {
+export default function AppMenu({
+  onNewWork,
+  onNewChapter,
+  onExport,
+  onSettings,
+  onToggleSidebar
+}: AppMenuProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -47,35 +56,80 @@ export default function AppMenu({ onNewWork, onNewChapter, onExport, onSettings 
     }
   }, [activeMenu]);
 
+  // 菜单配置 - 使用统一的快捷键格式
   const menus: MenuSection[] = [
     {
       title: '文件',
       items: [
-        { label: '新建作品', shortcut: 'Ctrl+N', onClick: onNewWork },
-        { label: '新建章节', shortcut: 'Ctrl+Shift+N', onClick: onNewChapter },
+        {
+          label: '新建作品',
+          shortcut: formatShortcut(ShortcutPresets.new(() => {})),
+          onClick: onNewWork
+        },
+        {
+          label: '新建章节',
+          shortcut: formatShortcut(ShortcutPresets.newChapter(() => {})),
+          onClick: onNewChapter
+        },
         { divider: true },
-        { label: '导出...', shortcut: 'Ctrl+E', onClick: onExport },
+        {
+          label: '导出...',
+          shortcut: formatShortcut(ShortcutPresets.export(() => {})),
+          onClick: onExport
+        },
         { divider: true },
-        { label: '设置', shortcut: 'Ctrl+,', onClick: onSettings },
+        {
+          label: '设置',
+          shortcut: formatShortcut(ShortcutPresets.settings(() => {})),
+          onClick: onSettings
+        },
       ],
     },
     {
       title: '编辑',
       items: [
-        { label: '撤销', shortcut: 'Ctrl+Z', disabled: true },
-        { label: '重做', shortcut: 'Ctrl+Y', disabled: true },
+        {
+          label: '撤销',
+          shortcut: formatShortcut(ShortcutPresets.undo(() => {})),
+          disabled: true
+        },
+        {
+          label: '重做',
+          shortcut: formatShortcut(ShortcutPresets.redo(() => {})),
+          disabled: true
+        },
         { divider: true },
-        { label: '查找', shortcut: 'Ctrl+F', disabled: true },
-        { label: '替换', shortcut: 'Ctrl+H', disabled: true },
+        {
+          label: '查找',
+          shortcut: formatShortcut(ShortcutPresets.find(() => {})),
+          disabled: true
+        },
+        {
+          label: '替换',
+          shortcut: formatShortcut(ShortcutPresets.replace(() => {})),
+          disabled: true
+        },
       ],
     },
     {
       title: '视图',
       items: [
-        { label: '切换侧边栏', shortcut: 'Ctrl+B', disabled: true },
-        { label: '切换预览', shortcut: 'Ctrl+P', disabled: true },
+        {
+          label: '切换侧边栏',
+          shortcut: formatShortcut(ShortcutPresets.toggleSidebar(() => {})),
+          onClick: onToggleSidebar
+        },
+        {
+          label: '切换预览',
+          shortcut: formatShortcut({ key: 'p', ctrl: true, handler: () => {} }),
+          disabled: true
+        },
         { divider: true },
-        { label: '全屏模式', shortcut: 'F11', disabled: true },
+        {
+          label: '全屏模式',
+          shortcut: 'F11',
+          disabled: true
+        },
       ],
     },
   ];
@@ -92,16 +146,17 @@ export default function AppMenu({ onNewWork, onNewChapter, onExport, onSettings 
   };
 
   return (
-    <div ref={menuRef} className="flex items-center gap-1 h-full">
+    <div ref={menuRef} className="flex items-center gap-1 h-full" style={{ pointerEvents: 'auto' }}>
       {menus.map((menu) => (
-        <div key={menu.title} className="relative">
+        <div key={menu.title} className="relative" style={{ pointerEvents: 'auto' }}>
           {/* 菜单标题按钮 */}
           <button
             className={`px-2 h-6 text-xs font-medium rounded transition-colors ${
               activeMenu === menu.title
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
+            style={{ pointerEvents: 'auto', position: 'relative', zIndex: 1001 }}
             onClick={() => handleMenuClick(menu.title)}
           >
             {menu.title}
@@ -109,13 +164,16 @@ export default function AppMenu({ onNewWork, onNewChapter, onExport, onSettings 
 
           {/* 下拉菜单 */}
           {activeMenu === menu.title && (
-            <div className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-lg border border-[#e5ddd2] py-1 min-w-[180px] z-[9999]">
+            <div
+              className="absolute top-full left-0 mt-1 bg-white rounded-lg shadow-lg border border-outline py-1 min-w-[180px]"
+              style={{ zIndex: 10000, pointerEvents: 'auto' }}
+            >
               {menu.items.map((item, idx) => {
                 if (item.divider) {
                   return (
                     <div
                       key={`divider-${idx}`}
-                      className="h-px bg-[#e5ddd2] my-1"
+                      className="h-px bg-outline my-1"
                     />
                   );
                 }
@@ -125,15 +183,15 @@ export default function AppMenu({ onNewWork, onNewChapter, onExport, onSettings 
                     key={item.label}
                     className={`w-full px-3 py-1.5 text-left text-sm flex items-center justify-between ${
                       item.disabled
-                        ? 'text-[#ccc] cursor-not-allowed'
-                        : 'text-[#38342e] hover:bg-[#faf8f5]'
+                        ? 'text-neutral-400 cursor-not-allowed'
+                        : 'text-on-surface hover:bg-surface-primary'
                     }`}
                     onClick={() => handleItemClick(item)}
                     disabled={item.disabled}
                   >
                     <span>{item.label}</span>
                     {item.shortcut && (
-                      <span className="text-xs text-[#7a6e5f] ml-4">{item.shortcut}</span>
+                      <span className="text-xs text-on-surface-secondary ml-4">{item.shortcut}</span>
                     )}
                   </button>
                 );

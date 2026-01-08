@@ -1,7 +1,7 @@
 /**
  * TitleBar - 自定义窗口标题栏组件
  *
- * 功能：
+ * 功能说明：
  * 1. 显示应用标题和当前文档名称
  * 2. 应用菜单（文件、编辑、视图）
  * 3. 窗口控制按钮（最小化、最大化、关闭）
@@ -15,11 +15,12 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import AppMenu from './AppMenu';
 
 interface TitleBarProps {
-  documentName?: string;      // 当前文档名称
-  onNewWork?: () => void;      // 新建作品回调
-  onNewChapter?: () => void;   // 新建章节回调
-  onExport?: () => void;       // 导出回调
-  onSettings?: () => void;     // 设置回调
+  documentName?: string;        // 当前文档名称
+  onNewWork?: () => void;        // 新建作品回调
+  onNewChapter?: () => void;     // 新建章节回调
+  onExport?: () => void;         // 导出回调
+  onSettings?: () => void;       // 设置回调
+  onToggleSidebar?: () => void;  // 切换侧边栏回调
 }
 
 export default function TitleBar({
@@ -28,6 +29,7 @@ export default function TitleBar({
   onNewChapter,
   onExport,
   onSettings,
+  onToggleSidebar,
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [isMacOS, setIsMacOS] = useState(false);
@@ -42,7 +44,7 @@ export default function TitleBar({
       const userAgent = navigator.userAgent.toLowerCase();
       const platform = navigator.platform.toLowerCase();
 
-      // 更精确的 macOS 检测：检查是否以 'mac' 开头，而不是包含 'mac'
+      // 更精确的 macOS 检测：检查是否以 'mac' 开头，而不是包含'mac'
       // 避免误判 'machine'、'x86_64' 等字符串
       const isMac = platform.startsWith('mac') || userAgent.includes('macintosh');
       setIsMacOS(isMac);
@@ -51,8 +53,8 @@ export default function TitleBar({
       console.log('=== 窗口拖拽调试信息 ===');
       console.log('User Agent:', userAgent);
       console.log('Platform:', platform);
-      console.log('是否为 macOS:', isMac);
-      console.log('检测依据:', platform.startsWith('mac') ? 'Platform' : userAgent.includes('macintosh') ? 'User Agent' : 'Both false');
+      console.log('是否为macOS:', isMac);
+      console.log('检测依据', platform.startsWith('mac') ? 'Platform' : userAgent.includes('macintosh') ? 'User Agent' : 'Both false');
     };
 
     // 检查最大化状态
@@ -148,7 +150,7 @@ export default function TitleBar({
       // 延迟获取状态，等待窗口动画完成
       setTimeout(async () => {
         const newState = await appWindow.isMaximized();
-        console.log('切换后状态:', newState ? '最大化' : '正常');
+        console.log('切换后状态', newState ? '最大化' : '正常');
         setIsMaximized(newState);
         // 延迟解锁，确保动画完成
         setTimeout(() => setIsToggling(false), 100);
@@ -161,10 +163,21 @@ export default function TitleBar({
 
   // 窗口控制按钮组件
   const WindowControls = () => (
-    <div className="flex items-center gap-1">
+    <div
+      className="flex items-center gap-1"
+      data-tauri-drag-region="false"
+      style={{
+        WebkitAppRegion: 'no-drag',
+        appRegion: 'no-drag',
+        position: 'relative',
+        zIndex: 10000
+      } as any}
+    >
       {/* 最小化 */}
       <button
         onClick={handleMinimize}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
         className="titlebar-button"
         title="最小化"
         aria-label="最小化窗口"
@@ -177,17 +190,19 @@ export default function TitleBar({
       {/* 最大化/还原 */}
       <button
         onClick={handleMaximize}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
         className="titlebar-button"
         title={isMaximized ? '还原' : '最大化'}
         aria-label={isMaximized ? '还原窗口' : '最大化窗口'}
       >
         {isMaximized ? (
-          // 还原图标（双窗口）
+          // 还原图标（双窗口图标）
           <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
             <path d="M 3 3 L 3 9 L 9 9 L 9 3 Z M 4 4 L 8 4 L 8 8 L 4 8 Z" />
           </svg>
         ) : (
-          // 最大化图标（单窗口）
+          // 最大化图标（单窗口图标）
           <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
             <path d="M 2 2 L 2 10 L 10 10 L 10 2 Z M 3.5 3.5 L 8.5 3.5 L 8.5 8.5 L 3.5 8.5 Z" />
           </svg>
@@ -197,6 +212,8 @@ export default function TitleBar({
       {/* 关闭 */}
       <button
         onClick={handleClose}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
         className="titlebar-button titlebar-button-close"
         title="关闭"
         aria-label="关闭窗口"
@@ -208,23 +225,38 @@ export default function TitleBar({
     </div>
   );
 
-  // macOS 样式的窗口控制按钮（交通灯）
+  // macOS 样式的窗口控制按钮（交通灯样式）
   const MacOSControls = () => (
-    <div className="flex items-center gap-2 pl-2">
+    <div
+      className="flex items-center gap-2 pl-2"
+      data-tauri-drag-region="false"
+      style={{
+        WebkitAppRegion: 'no-drag',
+        appRegion: 'no-drag',
+        position: 'relative',
+        zIndex: 10000
+      } as any}
+    >
       <button
         onClick={handleClose}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
         className="w-3 h-3 rounded-full bg-[#ff5f57] hover:bg-[#ff4136] transition-colors"
         title="关闭"
         aria-label="关闭窗口"
       />
       <button
         onClick={handleMinimize}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
         className="w-3 h-3 rounded-full bg-[#febc2e] hover:bg-[#ffb700] transition-colors"
         title="最小化"
         aria-label="最小化窗口"
       />
       <button
         onClick={handleMaximize}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseUp={(e) => e.stopPropagation()}
         className="w-3 h-3 rounded-full bg-[#28c840] hover:bg-[#00d924] transition-colors"
         title={isMaximized ? '还原' : '最大化'}
         aria-label={isMaximized ? '还原窗口' : '最大化窗口'}
@@ -239,17 +271,19 @@ export default function TitleBar({
         height: 'var(--titlebar-height)',
         backgroundColor: 'var(--surface-secondary)',
         borderBottom: '1px solid var(--outline-variant)',
-        boxShadow: 'var(--elevation-1)'
-      }}
+        boxShadow: 'var(--elevation-1)',
+        WebkitAppRegion: 'drag',
+        appRegion: 'drag',
+        position: 'relative',
+        zIndex: 1000
+      } as any}
       onDoubleClick={handleDoubleClick}
     >
       {/* macOS 布局：控制按钮在左侧，内容在右侧 */}
       {isMacOS ? (
         <>
           {/* 左侧：窗口控制按钮 - 禁用拖拽 */}
-          <div style={{ appRegion: 'no-drag', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            <MacOSControls />
-          </div>
+          <MacOSControls />
 
           {/* 中间：空白拖拽区域 */}
           <div className="flex-1" data-tauri-drag-region />
@@ -269,12 +303,16 @@ export default function TitleBar({
             )}
 
             {/* 应用菜单 - 禁用拖拽，保持可点击 */}
-            <div style={{ appRegion: 'no-drag', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            <div
+              data-tauri-drag-region="false"
+              style={{ appRegion: 'no-drag', WebkitAppRegion: 'no-drag' } as React.CSSProperties}
+            >
               <AppMenu
                 onNewWork={onNewWork}
                 onNewChapter={onNewChapter}
                 onExport={onExport}
                 onSettings={onSettings}
+                onToggleSidebar={onToggleSidebar}
               />
             </div>
 
@@ -304,7 +342,10 @@ export default function TitleBar({
         /* Windows/Linux 布局：控制按钮在右侧 */
         <>
           {/* 左侧区域：Logo、菜单、文档名称 */}
-          <div className="flex items-center gap-2 px-3" data-tauri-drag-region>
+          <div
+            className="flex items-center gap-2 px-3"
+            style={{ WebkitAppRegion: 'drag', appRegion: 'drag' } as any}
+          >
             {/* Logo - 可拖拽区域 */}
             <svg
               width="32"
@@ -327,12 +368,19 @@ export default function TitleBar({
             </svg>
 
             {/* 应用菜单 - 禁用拖拽，保持可点击 */}
-            <div style={{ appRegion: 'no-drag', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+            <div
+              data-tauri-drag-region="false"
+              style={{
+                WebkitAppRegion: 'no-drag',
+                appRegion: 'no-drag'
+              } as any}
+            >
               <AppMenu
                 onNewWork={onNewWork}
                 onNewChapter={onNewChapter}
                 onExport={onExport}
                 onSettings={onSettings}
+                onToggleSidebar={onToggleSidebar}
               />
             </div>
 
@@ -350,12 +398,10 @@ export default function TitleBar({
           </div>
 
           {/* 中间空白区域 - 可拖拽 */}
-          <div className="flex-1" data-tauri-drag-region />
+          <div className="flex-1" style={{ WebkitAppRegion: 'drag', appRegion: 'drag' } as any} />
 
           {/* 右侧：窗口控制按钮 - 禁用拖拽，保持可点击 */}
-          <div className="pr-2" style={{ appRegion: 'no-drag', WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-            <WindowControls />
-          </div>
+          <WindowControls />
         </>
       )}
     </div>

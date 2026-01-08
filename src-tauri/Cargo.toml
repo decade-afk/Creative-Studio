@@ -17,6 +17,9 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# 暂时禁用 - 仅在使用 LanceDB 时需要
+# protobuf-src = "2.1"
+# prost-build = "0.12"
 
 [dependencies]
 # Tauri framework and plugins
@@ -31,27 +34,10 @@ tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# Loci AI Core - 本地 AI 推理引擎
-# 开发环境：使用本地路径依赖，支持快速迭代
-# 生产环境：切换为 git 依赖或发布的 crate
-loci = { path = "../../Loci" }
-
-# 异步运行时（Tauri 已包含，但 loci 回调可能需要）
-tokio = { version = "1", features = ["full"] }
-
-# 其他依赖（Desktop 特定功能）
-parking_lot = "0.12"    # 高性能锁（流式生成状态管理）
-uuid = { version = "1.19.0", features = ["v4"] }  # UUID 生成
-num_cpus = "1.17"       # CPU 核心数检测
-
-# 向量数据库（Vector Database）
-lancedb = "0.10"        # LanceDB 向量数据库客户端
-arrow = "52"            # Apache Arrow 数据格式 (匹配LanceDB版本)
-arrow-array = "52"      # Arrow 数组操作 (匹配LanceDB版本)
-arrow-schema = "52"     # Arrow Schema 定义 (匹配LanceDB版本)
-
-# 文本嵌入和向量化（可选，如果需要本地嵌入）
-# fastembed = "3"       # 快速文本嵌入（可选）
-
-# 错误处理增强
+# 错误处理
 anyhow = "1.0"          # 简化错误处理
+thiserror = "1.0"       # 错误类型派生宏
+
+# 日志系统
+tracing = "0.1"         # 结构化日志
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

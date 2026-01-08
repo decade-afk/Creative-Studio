@@ -11,14 +11,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import type { WorkType } from '../types/storage';
-import type { AIWritingFunction } from '../types/ai';
-import { generateWithTemplate, isAIModelLoaded } from '../services/aiService';
 
 interface EditorToolbarProps {
   workType: WorkType;
   editorRef: React.RefObject<HTMLDivElement | null>;
   wordCount: number;
-  onShowToast?: (message: string, type: 'success' | 'error' | 'warning') => void;
 }
 
 // 快捷文本模板
@@ -75,24 +72,10 @@ const COLORS = [
   { label: '粉色', value: '#fce7f3' },
 ];
 
-// AI 写作功能
-const AI_FUNCTIONS: Array<{ func: AIWritingFunction; label: string; icon: string }> = [
-  { func: 'continue', label: '智能续写', icon: '✨' },
-  { func: 'expand', label: '内容扩写', icon: '📝' },
-  { func: 'polish', label: '文字润色', icon: '💎' },
-  { func: 'summarize', label: '生成摘要', icon: '📋' },
-  { func: 'rewrite', label: '内容改写', icon: '🔄' },
-  { func: 'brainstorm', label: '头脑风暴', icon: '💡' },
-  { func: 'dialogue', label: '对话生成', icon: '💬' },
-  { func: 'description', label: '场景描述', icon: '🎬' },
-];
-
-export default function EditorToolbar({ workType, editorRef, wordCount, onShowToast }: EditorToolbarProps) {
+export default function EditorToolbar({ workType, editorRef, wordCount }: EditorToolbarProps) {
   const [activeFormats, setActiveFormats] = useState<Set<string>>(new Set());
   const [showDropdown, setShowDropdown] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const [aiModelLoaded, setAiModelLoaded] = useState(false);
-  const [aiGenerating, setAiGenerating] = useState(false);
 
   /**
    * 执行文本格式化命令
@@ -272,67 +255,34 @@ export default function EditorToolbar({ workType, editorRef, wordCount, onShowTo
   };
 
   /**
-   * 处理 AI 生成
-   */
-  const handleAIGenerate = async (aiFunc: AIWritingFunction) => {
-    if (!aiModelLoaded) {
-      onShowToast?.('请先在设置中加载 AI 模型', 'warning');
-      return;
-    }
-
-    // 获取选中的文本或编辑器所有内容
-    const selection = window.getSelection();
-    let text = selection?.toString() || '';
-
-    // 如果没有选中文本，使用编辑器内容
-    if (!text && editorRef.current) {
-      text = editorRef.current.innerText || '';
-    }
-
-    if (!text.trim()) {
-      onShowToast?.('请先输入或选择要处理的文本', 'warning');
-      return;
-    }
-
-    setAiGenerating(true);
-    setShowDropdown(null);
-
-    try {
-      const response = await generateWithTemplate(aiFunc, text);
-
-      // 将生成的内容插入到编辑器
-      insertHTML(`<div class="mb-4 text-[#38342e] p-4 bg-primary-50 border-l-4 border-primary-500 rounded">${response.content}</div>`);
-
-      onShowToast?.('AI 生成成功', 'success');
-    } catch (error: any) {
-      console.error('AI 生成失败:', error);
-      onShowToast?.(`AI 生成失败: ${error}`, 'error');
-    } finally {
-      setAiGenerating(false);
-    }
-  };
-
-  /**
-   * 检查 AI 模型加载状态
-   */
-  useEffect(() => {
-    async function checkAIModel() {
-      const loaded = await isAIModelLoaded();
-      setAiModelLoaded(loaded);
-    }
-    checkAIModel();
-  }, []);
-
-  /**
    * 监听选择变化，更新激活状态
+   * 使用防抖优化性能，避免频繁触发
    */
   useEffect(() => {
+    let debounceTimer: number | null = null;
+
     const handleSelectionChange = () => {
-      updateActiveFormats();
+      // 清除之前的定时器
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+      }
+
+      // 设置新的定时器（100ms防抖）
+      debounceTimer = window.setTimeout(() => {
+        updateActiveFormats();
+        debounceTimer = null;
+      }, 100);
     };
+
     document.addEventListener('selectionchange', handleSelectionChange);
+
+    // 清理函数
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
+      // 清除待执行的定时器
+      if (debounceTimer !== null) {
+        clearTimeout(debounceTimer);
+      }
     };
   }, []);
 
@@ -617,43 +567,6 @@ export default function EditorToolbar({ workType, editorRef, wordCount, onShowTo
           </button>
         </div>
       )}
-
-      {/* AI 辅助工具 */}
-      <div className="flex items-center gap-1 pr-2 border-r border-[#e5ddd2] relative">
-        <button
-          onClick={() => toggleDropdown('ai')}
-          className={`toolbar-btn-text ${!aiModelLoaded ? 'opacity-50' : ''}`}
-          title={aiModelLoaded ? 'AI 辅助写作' : 'AI 模型未加载'}
-          disabled={aiGenerating}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-          </svg>
-          <span className="text-xs">{aiGenerating ? '生成中...' : 'AI'}</span>
-        </button>
-
-        {showDropdown === 'ai' && (
-          <div className="absolute top-full left-0 mt-1 bg-white border border-[#e5ddd2] rounded-lg shadow-lg py-1 z-50 w-40">
-            {!aiModelLoaded ? (
-              <div className="px-3 py-2 text-xs text-[#9a8c79] text-center">
-                请先在设置中加载模型
-              </div>
-            ) : (
-              AI_FUNCTIONS.map((item) => (
-                <button
-                  key={item.func}
-                  onClick={() => handleAIGenerate(item.func)}
-                  className="w-full px-3 py-2 text-left text-xs hover:bg-primary-50 text-[#38342e] flex items-center gap-2"
-                  disabled={aiGenerating}
-                >
-                  <span>{item.icon}</span>
-                  <span>{item.label}</span>
-                </button>
-              ))
-            )}
-          </div>
-        )}
-      </div>
 
       {/* 快捷模板 */}
       <div className="flex items-center gap-1 pr-2 border-r border-[#e5ddd2] relative">

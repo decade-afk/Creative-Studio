@@ -528,23 +528,43 @@ textarea {
 
 /**
  * 拖拽区域基础样式
+ * 使用WebkitAppRegion和appRegion样式属性
  * 必须禁用文本选择，确保拖拽功能正常
  */
-[data-tauri-drag-region] {
+[data-tauri-drag-region],
+[style*="app-region: drag"],
+[style*="WebkitAppRegion: drag"] {
   -webkit-user-select: none;     /* Safari/Chrome */
   -moz-user-select: none;        /* Firefox */
   -ms-user-select: none;         /* IE/Edge */
   user-select: none;             /* 标准语法 */
   -webkit-app-region: drag;      /* WebKit引擎（Electron兼容） */
   app-region: drag;              /* 标准语法 */
+  pointer-events: auto;          /* 允许接收鼠标事件 */
+  position: relative;            /* 相对定位 */
+  z-index: 1;                    /* 拖拽区域在下层 */
 }
 
 /**
  * 拖拽区域悬停时的光标样式
  * 提供视觉反馈，表明该区域可拖拽
  */
-[data-tauri-drag-region]:hover {
+[data-tauri-drag-region]:hover,
+[style*="app-region: drag"]:hover,
+[style*="WebkitAppRegion: drag"]:hover {
   cursor: move;                  /* 移动光标 */
+}
+
+/**
+ * 非拖拽区域样式
+ * 用于按钮、菜单等需要点击的元素
+ */
+[data-tauri-drag-region="false"],
+[style*="app-region: no-drag"],
+[style*="WebkitAppRegion: no-drag"] {
+  -webkit-app-region: no-drag !important;  /* 强制禁用拖拽 */
+  app-region: no-drag !important;          /* 强制禁用拖拽 */
+  pointer-events: auto !important;         /* 确保可以接收点击事件 */
 }
 
 /* ========================================

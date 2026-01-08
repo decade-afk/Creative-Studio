@@ -1,5 +1,5 @@
 /**
- * PlannerView - 规划视图组件（完整重构版）
+ * PlannerView - 规划视图组件（完整重构版本）
  *
  * 【核心功能】
  * 1. Kanban 看板大纲管理 - 支持多种类型（章节/场景/角色/情节/主题）
@@ -12,7 +12,7 @@
  *    - 角色关系：支持记录角色间的关系网络
  *    - 卡片式展示，支持编辑和删除
  *
- * 3. 场景管理 - 场景库
+ * 3. 场景管理 - 场景卡片
  *    - 场景属性：名称、位置、时间、描述、氛围
  *    - 场景筛选和搜索
  *    - 支持场景复用
@@ -43,7 +43,7 @@
  * 4. 切换作品 → 重新加载所有数据
  *
  * 【注意事项】
- * 1. 所有数据操作都有 loading 状态，防止重复提交
+ * 1. 所有数据操作都带 loading 状态，防止重复提交
  * 2. 删除操作需要确认，防止误删
  * 3. 编辑表单使用受控组件，确保数据同步
  * 4. useCallback 用于事件处理函数，优化性能
@@ -354,7 +354,7 @@ export default function PlannerView() {
   }, [deletingId, currentTab, reloadCurrentTab, showToast]);
 
   return (
-    <div className="flex-1 flex flex-col bg-[#faf8f5] overflow-hidden">
+    <div className="flex-1 flex flex-col bg-surface-primary overflow-hidden">
       {ToastComponent}
 
       {/* 确认删除对话框 */}
@@ -383,8 +383,8 @@ export default function PlannerView() {
             onClick={() => setCurrentTab('outline')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'outline'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
             📋 大纲
@@ -393,8 +393,8 @@ export default function PlannerView() {
             onClick={() => setCurrentTab('characters')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'characters'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
             👤 角色
@@ -403,8 +403,8 @@ export default function PlannerView() {
             onClick={() => setCurrentTab('scenes')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'scenes'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
             🎬 场景
@@ -413,8 +413,8 @@ export default function PlannerView() {
             onClick={() => setCurrentTab('milestones')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'milestones'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
             🎯 里程碑
@@ -423,8 +423,8 @@ export default function PlannerView() {
             onClick={() => setCurrentTab('worldSettings')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'worldSettings'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
             🌍 世界观
@@ -434,7 +434,7 @@ export default function PlannerView() {
         <button
           onClick={handleQuickCreate}
           disabled={loading}
-          className="px-4 py-2 bg-[#a07d5e] text-white rounded-lg text-sm font-medium hover:bg-[#8b6342] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? '处理中...' : '+ 新建'}
         </button>
@@ -444,7 +444,7 @@ export default function PlannerView() {
       <div className="flex-1 overflow-auto p-6">
         {loading && (
           <div className="flex items-center justify-center h-32">
-            <div className="text-[#7a6e5f]">加载中...</div>
+            <div className="text-on-surface-secondary">加载中...</div>
           </div>
         )}
 
@@ -491,7 +491,7 @@ export default function PlannerView() {
         )}
 
         {!currentWorkId && !loading && (
-          <div className="flex items-center justify-center h-full text-[#7a6e5f]">
+          <div className="flex items-center justify-center h-full text-on-surface-secondary">
             <div className="text-center">
               <p>请先创建作品</p>
               <p className="text-sm mt-2">切换到创作视图创建您的第一个作品</p>
@@ -548,8 +548,8 @@ function EditDialog({
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
         <form onSubmit={handleSubmit}>
           {/* 标题 */}
-          <div className="px-6 py-4 border-b border-[#e5ddd2] sticky top-0 bg-white">
-            <h3 className="text-lg font-semibold text-[#38342e]">
+          <div className="px-6 py-4 border-b border-outline sticky top-0 bg-white">
+            <h3 className="text-lg font-semibold text-on-surface">
               编辑{getDialogTitle()}
             </h3>
           </div>
@@ -589,17 +589,17 @@ function EditDialog({
           </div>
 
           {/* 按钮 */}
-          <div className="px-6 py-4 border-t border-[#e5ddd2] flex justify-end gap-3 sticky bottom-0 bg-white">
+          <div className="px-6 py-4 border-t border-outline flex justify-end gap-3 sticky bottom-0 bg-white">
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-[#5d554a] hover:bg-[#faf8f5] transition-colors"
+              className="px-4 py-2 rounded-lg text-sm font-medium text-on-surface-variant hover:bg-surface-primary transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-[#a07d5e] text-white hover:bg-[#8b6342] transition-colors"
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-500 text-white hover:bg-primary-600 transition-colors"
             >
               保存
             </button>
@@ -621,11 +621,11 @@ function OutlineForm({
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">类型</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">类型</label>
         <select
           value={node.type}
           onChange={(e) => onChange({ ...node, type: e.target.value as 'act' | 'scene' | 'event' })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="act">幕</option>
           <option value="scene">场景</option>
@@ -633,21 +633,21 @@ function OutlineForm({
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">标题</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">标题</label>
         <input
           type="text"
           value={node.title}
           onChange={(e) => onChange({ ...node, title: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入标题"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">描述</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">描述</label>
         <textarea
           value={node.description}
           onChange={(e) => onChange({ ...node, description: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[100px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[100px]"
           placeholder="输入描述"
         />
       </div>
@@ -666,49 +666,49 @@ function CharacterForm({
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">名称</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">名称</label>
         <input
           type="text"
           value={character.name}
           onChange={(e) => onChange({ ...character, name: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入角色名称"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">头像（emoji 或 URL）</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">头像（emoji 或 URL）</label>
         <input
           type="text"
           value={character.avatar || ''}
           onChange={(e) => onChange({ ...character, avatar: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="例如: 👨 或图片URL"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">描述</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">描述</label>
         <textarea
           value={character.description}
           onChange={(e) => onChange({ ...character, description: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[100px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[100px]"
           placeholder="输入角色描述"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">性格</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">性格</label>
         <textarea
           value={character.personality || ''}
           onChange={(e) => onChange({ ...character, personality: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[80px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[80px]"
           placeholder="输入性格特点"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">关系</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">关系</label>
         <textarea
           value={character.relationships || ''}
           onChange={(e) => onChange({ ...character, relationships: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[80px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[80px]"
           placeholder="输入角色关系"
         />
       </div>
@@ -727,31 +727,31 @@ function SceneForm({
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">场景名称</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">场景名称</label>
         <input
           type="text"
           value={scene.name}
           onChange={(e) => onChange({ ...scene, name: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入场景名称"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">地点</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">地点</label>
         <input
           type="text"
           value={scene.location}
           onChange={(e) => onChange({ ...scene, location: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入地点"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">时间段</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">时间段</label>
         <select
           value={scene.time_of_day}
           onChange={(e) => onChange({ ...scene, time_of_day: e.target.value as Scene['time_of_day'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="morning">早晨</option>
           <option value="noon">中午</option>
@@ -761,21 +761,21 @@ function SceneForm({
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">描述</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">描述</label>
         <textarea
           value={scene.description}
           onChange={(e) => onChange({ ...scene, description: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[100px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[100px]"
           placeholder="输入场景描述"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">氛围</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">氛围</label>
         <input
           type="text"
           value={scene.mood || ''}
           onChange={(e) => onChange({ ...scene, mood: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="例如: 紧张、轻松、浪漫"
         />
       </div>
@@ -794,21 +794,21 @@ function MilestoneForm({
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">标题</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">标题</label>
         <input
           type="text"
           value={milestone.title}
           onChange={(e) => onChange({ ...milestone, title: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入里程碑标题"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">状态</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">状态</label>
         <select
           value={milestone.status}
           onChange={(e) => onChange({ ...milestone, status: e.target.value as Milestone['status'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="pending">待办</option>
           <option value="in_progress">进行中</option>
@@ -816,20 +816,20 @@ function MilestoneForm({
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">截止日期</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">截止日期</label>
         <input
           type="date"
           value={milestone.due_date ? new Date(milestone.due_date).toISOString().split('T')[0] : ''}
           onChange={(e) => onChange({ ...milestone, due_date: e.target.value ? new Date(e.target.value).toISOString() : null })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">描述</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">描述</label>
         <textarea
           value={milestone.description}
           onChange={(e) => onChange({ ...milestone, description: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[100px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[100px]"
           placeholder="输入里程碑描述"
         />
       </div>
@@ -849,7 +849,7 @@ function OutlineView({
 }) {
   if (nodes.length === 0) {
     return (
-      <div className="text-center py-12 text-[#7a6e5f]">
+      <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">📋</div>
         <p>暂无大纲节点</p>
         <p className="text-sm mt-2">点击"新建"创建第一个大纲节点</p>
@@ -862,26 +862,26 @@ function OutlineView({
       {nodes.map((node) => (
         <div
           key={node.id}
-          className="group p-4 bg-white rounded-lg border border-[#e5ddd2] hover:shadow-md transition-shadow"
+          className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow"
         >
           <div className="flex items-start justify-between">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f]">
+                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
                   {node.type === 'act' && '幕'}
                   {node.type === 'scene' && '场景'}
                   {node.type === 'event' && '事件'}
                 </span>
-                <h3 className="font-medium text-[#38342e]">{node.title}</h3>
+                <h3 className="font-medium text-on-surface">{node.title}</h3>
               </div>
               {node.description && (
-                <p className="text-sm text-[#7a6e5f]">{node.description}</p>
+                <p className="text-sm text-on-surface-secondary">{node.description}</p>
               )}
             </div>
             <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
                 onClick={() => onEdit(node)}
-                className="p-2 text-[#a07d5e] hover:bg-[#faf8f5] rounded transition-colors"
+                className="p-2 text-primary-500 hover:bg-surface-primary rounded transition-colors"
                 title="编辑"
               >
                 ✏️
@@ -913,7 +913,7 @@ function CharactersView({
 }) {
   if (characters.length === 0) {
     return (
-      <div className="text-center py-12 text-[#7a6e5f]">
+      <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">👤</div>
         <p>暂无角色</p>
         <p className="text-sm mt-2">点击"新建"创建第一个角色</p>
@@ -926,12 +926,12 @@ function CharactersView({
       {characters.map((char) => (
         <div
           key={char.id}
-          className="group p-4 bg-white rounded-lg border border-[#e5ddd2] hover:shadow-md transition-shadow relative"
+          className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow relative"
         >
           <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
               onClick={() => onEdit(char)}
-              className="p-1.5 text-[#a07d5e] hover:bg-[#faf8f5] rounded transition-colors text-sm"
+              className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm"
               title="编辑"
             >
               ✏️
@@ -949,11 +949,11 @@ function CharactersView({
               {char.avatar || char.name.charAt(0)}
             </div>
             <div>
-              <h3 className="font-medium text-[#38342e]">{char.name}</h3>
+              <h3 className="font-medium text-on-surface">{char.name}</h3>
             </div>
           </div>
           {char.description && (
-            <p className="text-sm text-[#7a6e5f] line-clamp-3">{char.description}</p>
+            <p className="text-sm text-on-surface-secondary line-clamp-3">{char.description}</p>
           )}
         </div>
       ))}
@@ -973,7 +973,7 @@ function ScenesView({
 }) {
   if (scenes.length === 0) {
     return (
-      <div className="text-center py-12 text-[#7a6e5f]">
+      <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">🎬</div>
         <p>暂无场景</p>
         <p className="text-sm mt-2">点击"新建"创建第一个场景</p>
@@ -986,12 +986,12 @@ function ScenesView({
       {scenes.map((scene) => (
         <div
           key={scene.id}
-          className="group p-4 bg-white rounded-lg border border-[#e5ddd2] hover:shadow-md transition-shadow"
+          className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow"
         >
           <div className="flex items-start justify-between mb-2">
-            <h3 className="font-medium text-[#38342e] flex-1">{scene.name}</h3>
+            <h3 className="font-medium text-on-surface flex-1">{scene.name}</h3>
             <div className="flex items-center gap-2">
-              <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f]">
+              <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
                 {scene.time_of_day === 'morning' && '🌅 早晨'}
                 {scene.time_of_day === 'noon' && '☀️ 中午'}
                 {scene.time_of_day === 'evening' && '🌇 傍晚'}
@@ -999,14 +999,14 @@ function ScenesView({
                 {scene.time_of_day === 'other' && '🕐 其他'}
               </span>
               {scene.location && (
-                <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f]">
+                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
                   📍 {scene.location}
                 </span>
               )}
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
                 <button
                   onClick={() => onEdit(scene)}
-                  className="p-1.5 text-[#a07d5e] hover:bg-[#faf8f5] rounded transition-colors text-sm"
+                  className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm"
                   title="编辑"
                 >
                   ✏️
@@ -1022,7 +1022,7 @@ function ScenesView({
             </div>
           </div>
           {scene.description && (
-            <p className="text-sm text-[#7a6e5f]">{scene.description}</p>
+            <p className="text-sm text-on-surface-secondary">{scene.description}</p>
           )}
         </div>
       ))}
@@ -1042,7 +1042,7 @@ function MilestonesView({
 }) {
   if (milestones.length === 0) {
     return (
-      <div className="text-center py-12 text-[#7a6e5f]">
+      <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">🎯</div>
         <p>暂无里程碑</p>
         <p className="text-sm mt-2">点击"新建"创建第一个里程碑</p>
@@ -1055,10 +1055,10 @@ function MilestonesView({
       {milestones.map((milestone) => (
         <div
           key={milestone.id}
-          className="group p-4 bg-white rounded-lg border border-[#e5ddd2] hover:shadow-md transition-shadow"
+          className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow"
         >
           <div className="flex items-start justify-between mb-2">
-            <h3 className="font-medium text-[#38342e] flex-1">{milestone.title}</h3>
+            <h3 className="font-medium text-on-surface flex-1">{milestone.title}</h3>
             <div className="flex items-center gap-2">
               <span
                 className={`text-xs px-2 py-1 rounded ${
@@ -1069,19 +1069,19 @@ function MilestonesView({
                     : 'bg-gray-100 text-gray-700'
                 }`}
               >
-                {milestone.status === 'pending' && '⏳ 待办'}
+                {milestone.status === 'pending' && '📋 待办'}
                 {milestone.status === 'in_progress' && '🚀 进行中'}
                 {milestone.status === 'completed' && '✅ 已完成'}
               </span>
               {milestone.due_date && (
-                <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f]">
+                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
                   📅 {new Date(milestone.due_date).toLocaleDateString()}
                 </span>
               )}
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
                 <button
                   onClick={() => onEdit(milestone)}
-                  className="p-1.5 text-[#a07d5e] hover:bg-[#faf8f5] rounded transition-colors text-sm"
+                  className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm"
                   title="编辑"
                 >
                   ✏️
@@ -1097,7 +1097,7 @@ function MilestonesView({
             </div>
           </div>
           {milestone.description && (
-            <p className="text-sm text-[#7a6e5f]">{milestone.description}</p>
+            <p className="text-sm text-on-surface-secondary">{milestone.description}</p>
           )}
         </div>
       ))}
@@ -1128,14 +1128,14 @@ function WorldSettingsView({
 
   return (
     <div className="space-y-4">
-      {/* 分类过滤器 */}
+      {/* 分类过滤 */}
       <div className="flex flex-wrap gap-2">
         <button
           onClick={() => onCategoryChange(null)}
           className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
             selectedCategory === null
-              ? 'bg-[#a07d5e] text-white'
-              : 'bg-white text-[#5d554a] border border-[#e5ddd2] hover:bg-[#faf8f5]'
+              ? 'bg-primary-500 text-white'
+              : 'bg-white text-on-surface-variant border border-outline hover:bg-surface-primary'
           }`}
         >
           全部
@@ -1148,8 +1148,8 @@ function WorldSettingsView({
               onClick={() => onCategoryChange(cat)}
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 selectedCategory === cat
-                  ? 'bg-[#a07d5e] text-white'
-                  : 'bg-white text-[#5d554a] border border-[#e5ddd2] hover:bg-[#faf8f5]'
+                  ? 'bg-primary-500 text-white'
+                  : 'bg-white text-on-surface-variant border border-outline hover:bg-surface-primary'
               }`}
             >
               {info.icon} {info.label}
@@ -1160,7 +1160,7 @@ function WorldSettingsView({
 
       {/* Bento 网格布局 */}
       {filteredSettings.length === 0 ? (
-        <div className="text-center py-12 text-[#7a6e5f]">
+        <div className="text-center py-12 text-on-surface-secondary">
           <div className="text-4xl mb-4">🌍</div>
           <p>暂无世界观设定</p>
           <p className="text-sm mt-2">点击"新建"创建第一个世界观设定</p>
@@ -1172,7 +1172,7 @@ function WorldSettingsView({
             return (
               <div
                 key={setting.id}
-                className="group p-5 bg-white rounded-xl border border-[#e5ddd2] hover:shadow-lg transition-all relative overflow-hidden"
+                className="group p-5 bg-white rounded-xl border border-outline hover:shadow-lg transition-all relative overflow-hidden"
               >
                 {/* 背景装饰 */}
                 <div 
@@ -1191,7 +1191,7 @@ function WorldSettingsView({
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => onEdit(setting)}
-                    className="p-1.5 bg-white text-[#a07d5e] hover:bg-[#faf8f5] rounded shadow-sm transition-colors text-sm"
+                    className="p-1.5 bg-white text-primary-500 hover:bg-surface-primary rounded shadow-sm transition-colors text-sm"
                     title="编辑"
                   >
                     ✏️
@@ -1214,13 +1214,13 @@ function WorldSettingsView({
                     {setting.icon_type || categoryInfo.icon}
                   </div>
                   <div className="flex-1">
-                    <div className="text-xs text-[#7a6e5f] mb-1">{categoryInfo.label}</div>
-                    <h3 className="font-semibold text-[#38342e] line-clamp-1">{setting.title}</h3>
+                    <div className="text-xs text-on-surface-secondary mb-1">{categoryInfo.label}</div>
+                    <h3 className="font-semibold text-on-surface line-clamp-1">{setting.title}</h3>
                   </div>
                 </div>
 
                 {/* 内容 */}
-                <p className="text-sm text-[#7a6e5f] line-clamp-3 mb-3">
+                <p className="text-sm text-on-surface-secondary line-clamp-3 mb-3">
                   {setting.content}
                 </p>
 
@@ -1230,13 +1230,13 @@ function WorldSettingsView({
                     {setting.tags.slice(0, 3).map((tag, idx) => (
                       <span 
                         key={idx}
-                        className="text-xs px-2 py-0.5 rounded bg-[#faf8f5] text-[#7a6e5f]"
+                        className="text-xs px-2 py-0.5 rounded bg-surface-primary text-on-surface-secondary"
                       >
                         {tag}
                       </span>
                     ))}
                     {setting.tags.length > 3 && (
-                      <span className="text-xs px-2 py-0.5 text-[#7a6e5f]">
+                      <span className="text-xs px-2 py-0.5 text-on-surface-secondary">
                         +{setting.tags.length - 3}
                       </span>
                     )}
@@ -1264,11 +1264,11 @@ function WorldSettingForm({
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">分类</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">分类</label>
         <select
           value={setting.category}
           onChange={(e) => onChange({ ...setting, category: e.target.value as WorldSettingCategory })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           {categories.map(cat => {
             const info = CATEGORY_ICONS[cat];
@@ -1281,36 +1281,36 @@ function WorldSettingForm({
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">标题</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">标题</label>
         <input
           type="text"
           value={setting.title}
           onChange={(e) => onChange({ ...setting, title: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入设定标题"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">内容</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">内容</label>
         <textarea
           value={setting.content}
           onChange={(e) => onChange({ ...setting, content: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[150px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[150px]"
           placeholder="输入详细内容"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">图标（emoji）</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">图标（emoji）</label>
         <input
           type="text"
           value={setting.icon_type || ''}
           onChange={(e) => onChange({ ...setting, icon_type: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="例如: 🏙️ 或留空使用默认图标"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">标签（用逗号分隔）</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">标签（用逗号分隔）</label>
         <input
           type="text"
           value={setting.tags?.join(', ') || ''}
@@ -1318,7 +1318,7 @@ function WorldSettingForm({
             ...setting, 
             tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) 
           })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="例如: 现代, 商业, 地标"
         />
       </div>

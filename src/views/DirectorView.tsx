@@ -1,29 +1,29 @@
 /**
- * DirectorView - 导演视图组件（完整重构版）
+ * DirectorView - 导演视图组件（完整重构版本）
  *
  * 【核心功能】
- * 1. 伏笔追踪系统（Clues） - 剧情伏笔管理
+ * 1. 伏笔追踪系统（Clues）- 剧情伏笔管理
  *    - 伏笔来源：手动添加 / AI自动检测
- *    - 伏笔状态：未铺垫 / 已铺垫 / 已回收 / 已废弃
+ *    - 伏笔状态：未铺陈 / 已铺陈 / 已回收 / 已废弃
  *    - 伏笔描述和追踪
  *    - 支持编辑和删除
  *
- * 2. 冲突矩阵管理（Conflicts） - 戏剧冲突分析
+ * 2. 冲突矩阵管理（Conflicts）- 戏剧冲突分析
  *    - 冲突类型：人物冲突 / 内心冲突 / 环境冲突 / 价值观冲突
  *    - 冲突强度：低 / 中 / 高 / 极高
  *    - 冲突状态：潜在 / 激化 / 高潮 / 解决 / 遗留
  *    - 涉及角色列表
  *    - 冲突描述和解决方案
  *
- * 3. 分镜时间线（Storyboards） - 镜头设计
- *    - 镜头类型：特写/近景/中景/远景/全景/大全景
- *    - 运镜方式：固定/推拉/摇移/跟随/升降/环绕/手持
+ * 3. 分镜时间线（Storyboards）- 镜头设计
+ *    - 镜头类型：特写 / 近景/中景/远景/全景/大全景
+ *    - 运镜方式：固定 / 推拉/摇移/跟随/升降/环绕/手持
  *    - 镜头时长（秒）
  *    - 分镜描述
  *    - 顺序号显示（font-mono）
  *
- * 4. 素材库管理（Assets） - 创作素材收集
- *    - 素材类型：图片/视频/音频/文档/参考/其他
+ * 4. 素材库管理（Assets）- 创作素材收集
+ *    - 素材类型：图片 / 视频/音频/文档/参考/其他
  *    - 素材标签（支持多标签，逗号分隔）
  *    - 网格式布局展示
  *    - 类型图标可视化
@@ -43,14 +43,14 @@
  * - UI 状态：loading
  *
  * 【数据流】
- * 1. 加载所有数据 → 存储在 state
+ * 1. 加载所有数据 → 从本地存储 → state
  * 2. 切换标签 → 切换显示，不重新加载
  * 3. CRUD 操作 → 只重新加载当前标签数据
  *
  * 【UI 特色】
- * - 伏笔：来源徽章（手动/AI） + 状态徽章
+ * - 伏笔：来源徽章（手动/AI）+ 状态徽章
  * - 冲突：三个徽章并排（类型、强度、状态）+ 角色列表
- * - 分镜：顺序号（font-mono） + 镜头类型 + 运镜方式 + 时长
+ * - 分镜：顺序号（font-mono）+ 镜头类型 + 运镜方式 + 时长
  * - 素材：网格布局 + 类型图标 + 标签展示
  *
  * 【注意事项】
@@ -337,7 +337,7 @@ export default function DirectorView() {
   }, [deletingId, currentTab, reloadCurrentTab, showToast]);
 
   return (
-    <div className="flex-1 flex flex-col bg-[#faf8f5] overflow-hidden">
+    <div className="flex-1 flex flex-col bg-surface-primary overflow-hidden">
       {ToastComponent}
 
       {/* 确认删除对话框 */}
@@ -366,8 +366,8 @@ export default function DirectorView() {
             onClick={() => setCurrentTab('clues')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'clues'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
             🔗 伏笔
@@ -376,18 +376,18 @@ export default function DirectorView() {
             onClick={() => setCurrentTab('conflicts')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'conflicts'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
-            ⚡ 冲突
+            ⚔️ 冲突
           </button>
           <button
             onClick={() => setCurrentTab('storyboards')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'storyboards'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
             📹 分镜
@@ -396,8 +396,8 @@ export default function DirectorView() {
             onClick={() => setCurrentTab('assets')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               currentTab === 'assets'
-                ? 'bg-[#a07d5e] text-white'
-                : 'text-[#5d554a] hover:bg-[rgba(122,110,95,0.1)]'
+                ? 'bg-primary-500 text-white'
+                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
             }`}
           >
             📦 素材
@@ -407,7 +407,7 @@ export default function DirectorView() {
         <button
           onClick={handleQuickCreate}
           disabled={loading}
-          className="px-4 py-2 bg-[#a07d5e] text-white rounded-lg text-sm font-medium hover:bg-[#8b6342] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? '处理中...' : '+ 新建'}
         </button>
@@ -417,7 +417,7 @@ export default function DirectorView() {
       <div className="flex-1 overflow-auto p-6">
         {loading && (
           <div className="flex items-center justify-center h-32">
-            <div className="text-[#7a6e5f]">加载中...</div>
+            <div className="text-on-surface-secondary">加载中...</div>
           </div>
         )}
 
@@ -454,7 +454,7 @@ export default function DirectorView() {
         )}
 
         {!currentWorkId && !loading && (
-          <div className="flex items-center justify-center h-full text-[#7a6e5f]">
+          <div className="flex items-center justify-center h-full text-on-surface-secondary">
             <div className="text-center">
               <p>请先创建作品</p>
               <p className="text-sm mt-2">切换到创作视图创建您的第一个作品</p>
@@ -499,8 +499,8 @@ function EditDialog({
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
       <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
         <form onSubmit={handleSubmit}>
-          <div className="px-6 py-4 border-b border-[#e5ddd2] sticky top-0 bg-white">
-            <h3 className="text-lg font-semibold text-[#38342e]">
+          <div className="px-6 py-4 border-b border-outline sticky top-0 bg-white">
+            <h3 className="text-lg font-semibold text-on-surface">
               编辑{type === 'clues' ? '伏笔' : type === 'conflicts' ? '冲突' : type === 'storyboards' ? '分镜' : '素材'}
             </h3>
           </div>
@@ -532,17 +532,17 @@ function EditDialog({
             )}
           </div>
 
-          <div className="px-6 py-4 border-t border-[#e5ddd2] flex justify-end gap-3 sticky bottom-0 bg-white">
+          <div className="px-6 py-4 border-t border-outline flex justify-end gap-3 sticky bottom-0 bg-white">
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-[#5d554a] hover:bg-[#faf8f5] transition-colors"
+              className="px-4 py-2 rounded-lg text-sm font-medium text-on-surface-variant hover:bg-surface-primary transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-[#a07d5e] text-white hover:bg-[#8b6342] transition-colors"
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-500 text-white hover:bg-primary-600 transition-colors"
             >
               保存
             </button>
@@ -558,43 +558,43 @@ function ClueForm({ clue, onChange }: { clue: Clue; onChange: (clue: Clue) => vo
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">名称</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">名称</label>
         <input
           type="text"
           value={clue.name}
           onChange={(e) => onChange({ ...clue, name: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入伏笔名称"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">来源</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">来源</label>
         <select
           value={clue.source}
           onChange={(e) => onChange({ ...clue, source: e.target.value as Clue['source'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="manual">手动标记</option>
           <option value="ai_detected">AI检测</option>
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">状态</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">状态</label>
         <select
           value={clue.status}
           onChange={(e) => onChange({ ...clue, status: e.target.value as Clue['status'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="open">未解决</option>
           <option value="resolved">已解决</option>
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">描述</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">描述</label>
         <textarea
           value={clue.description}
           onChange={(e) => onChange({ ...clue, description: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[100px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[100px]"
           placeholder="输入伏笔描述"
         />
       </div>
@@ -607,21 +607,21 @@ function ConflictForm({ conflict, onChange }: { conflict: Conflict; onChange: (c
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">名称</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">名称</label>
         <input
           type="text"
           value={conflict.name}
           onChange={(e) => onChange({ ...conflict, name: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入冲突名称"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">类型</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">类型</label>
         <select
           value={conflict.type}
           onChange={(e) => onChange({ ...conflict, type: e.target.value as Conflict['type'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="character">人物冲突</option>
           <option value="environment">环境冲突</option>
@@ -630,11 +630,11 @@ function ConflictForm({ conflict, onChange }: { conflict: Conflict; onChange: (c
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">强度</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">强度</label>
         <select
           value={conflict.intensity}
           onChange={(e) => onChange({ ...conflict, intensity: e.target.value as Conflict['intensity'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="low">低</option>
           <option value="medium">中</option>
@@ -643,11 +643,11 @@ function ConflictForm({ conflict, onChange }: { conflict: Conflict; onChange: (c
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">状态</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">状态</label>
         <select
           value={conflict.status}
           onChange={(e) => onChange({ ...conflict, status: e.target.value as Conflict['status'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="active">活跃</option>
           <option value="escalating">升级中</option>
@@ -656,30 +656,30 @@ function ConflictForm({ conflict, onChange }: { conflict: Conflict; onChange: (c
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">涉及角色</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">涉及角色</label>
         <input
           type="text"
           value={conflict.characters}
           onChange={(e) => onChange({ ...conflict, characters: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="例如: 张三, 李四"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">描述</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">描述</label>
         <textarea
           value={conflict.description}
           onChange={(e) => onChange({ ...conflict, description: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[100px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[100px]"
           placeholder="输入冲突描述"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">解决方案</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">解决方案</label>
         <textarea
           value={conflict.resolution}
           onChange={(e) => onChange({ ...conflict, resolution: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[80px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[80px]"
           placeholder="输入解决方案"
         />
       </div>
@@ -692,21 +692,21 @@ function StoryboardForm({ storyboard, onChange }: { storyboard: Storyboard; onCh
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">标题</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">标题</label>
         <input
           type="text"
           value={storyboard.title}
           onChange={(e) => onChange({ ...storyboard, title: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入分镜标题"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">镜头类型</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">镜头类型</label>
         <select
           value={storyboard.shot_type}
           onChange={(e) => onChange({ ...storyboard, shot_type: e.target.value as Storyboard['shot_type'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="wide">远景</option>
           <option value="medium">中景</option>
@@ -715,11 +715,11 @@ function StoryboardForm({ storyboard, onChange }: { storyboard: Storyboard; onCh
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">镜头运动</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">镜头运动</label>
         <select
           value={storyboard.camera_movement}
           onChange={(e) => onChange({ ...storyboard, camera_movement: e.target.value as Storyboard['camera_movement'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="static">固定</option>
           <option value="pan">摇镜</option>
@@ -730,23 +730,23 @@ function StoryboardForm({ storyboard, onChange }: { storyboard: Storyboard; onCh
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">时长（秒）</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">时长（秒）</label>
         <input
           type="number"
           value={storyboard.duration}
           onChange={(e) => onChange({ ...storyboard, duration: parseFloat(e.target.value) || 0 })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="0"
           min="0"
           step="0.1"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">描述</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">描述</label>
         <textarea
           value={storyboard.description}
           onChange={(e) => onChange({ ...storyboard, description: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e] min-h-[100px]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[100px]"
           placeholder="输入分镜描述"
         />
       </div>
@@ -759,21 +759,21 @@ function AssetForm({ asset, onChange }: { asset: Asset; onChange: (asset: Asset)
   return (
     <>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">名称</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">名称</label>
         <input
           type="text"
           value={asset.name}
           onChange={(e) => onChange({ ...asset, name: e.target.value })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入素材名称"
         />
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">类型</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">类型</label>
         <select
           value={asset.type}
           onChange={(e) => onChange({ ...asset, type: e.target.value as Asset['type'] })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
         >
           <option value="image">图片</option>
           <option value="video">视频</option>
@@ -782,12 +782,12 @@ function AssetForm({ asset, onChange }: { asset: Asset; onChange: (asset: Asset)
         </select>
       </div>
       <div>
-        <label className="block text-sm font-medium text-[#5d554a] mb-2">标签（逗号分隔）</label>
+        <label className="block text-sm font-medium text-on-surface-variant mb-2">标签（逗号分隔）</label>
         <input
           type="text"
           value={asset.tags.join(', ')}
           onChange={(e) => onChange({ ...asset, tags: e.target.value.split(',').map(t => t.trim()).filter(t => t) })}
-          className="w-full px-3 py-2 border border-[#e5ddd2] rounded-lg focus:outline-none focus:ring-2 focus:ring-[#a07d5e]"
+          className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="例如: 人物, 背景, 道具"
         />
       </div>
@@ -799,7 +799,7 @@ function AssetForm({ asset, onChange }: { asset: Asset; onChange: (asset: Asset)
 function CluesView({ clues, onEdit, onDelete }: { clues: Clue[]; onEdit: (clue: Clue) => void; onDelete: (id: string) => void }) {
   if (clues.length === 0) {
     return (
-      <div className="text-center py-12 text-[#7a6e5f]">
+      <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">🔗</div>
         <p>暂无伏笔</p>
         <p className="text-sm mt-2">点击"新建"创建第一个伏笔</p>
@@ -810,9 +810,9 @@ function CluesView({ clues, onEdit, onDelete }: { clues: Clue[]; onEdit: (clue: 
   return (
     <div className="grid gap-3">
       {clues.map((clue) => (
-        <div key={clue.id} className="group p-4 bg-white rounded-lg border border-[#e5ddd2] hover:shadow-md transition-shadow">
+        <div key={clue.id} className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow">
           <div className="flex items-start justify-between mb-2">
-            <h3 className="font-medium text-[#38342e] flex-1">{clue.name}</h3>
+            <h3 className="font-medium text-on-surface flex-1">{clue.name}</h3>
             <div className="flex items-center gap-2">
               <span className={`text-xs px-2 py-1 rounded ${clue.source === 'ai_detected' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
                 {clue.source === 'ai_detected' ? '🤖 AI检测' : '✍️ 手动'}
@@ -821,12 +821,12 @@ function CluesView({ clues, onEdit, onDelete }: { clues: Clue[]; onEdit: (clue: 
                 {clue.status === 'open' ? '📂 未解决' : '✅ 已解决'}
               </span>
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                <button onClick={() => onEdit(clue)} className="p-1.5 text-[#a07d5e] hover:bg-[#faf8f5] rounded transition-colors text-sm" title="编辑">✏️</button>
+                <button onClick={() => onEdit(clue)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
                 <button onClick={() => onDelete(clue.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
               </div>
             </div>
           </div>
-          {clue.description && <p className="text-sm text-[#7a6e5f]">{clue.description}</p>}
+          {clue.description && <p className="text-sm text-on-surface-secondary">{clue.description}</p>}
         </div>
       ))}
     </div>
@@ -837,8 +837,8 @@ function CluesView({ clues, onEdit, onDelete }: { clues: Clue[]; onEdit: (clue: 
 function ConflictsView({ conflicts, onEdit, onDelete }: { conflicts: Conflict[]; onEdit: (conflict: Conflict) => void; onDelete: (id: string) => void }) {
   if (conflicts.length === 0) {
     return (
-      <div className="text-center py-12 text-[#7a6e5f]">
-        <div className="text-4xl mb-4">⚡</div>
+      <div className="text-center py-12 text-on-surface-secondary">
+        <div className="text-4xl mb-4">⚔️</div>
         <p>暂无冲突</p>
         <p className="text-sm mt-2">点击"新建"创建第一个冲突</p>
       </div>
@@ -848,11 +848,11 @@ function ConflictsView({ conflicts, onEdit, onDelete }: { conflicts: Conflict[];
   return (
     <div className="grid gap-3">
       {conflicts.map((conflict) => (
-        <div key={conflict.id} className="group p-4 bg-white rounded-lg border border-[#e5ddd2] hover:shadow-md transition-shadow">
+        <div key={conflict.id} className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow">
           <div className="flex items-start justify-between mb-2">
-            <h3 className="font-medium text-[#38342e] flex-1">{conflict.name}</h3>
+            <h3 className="font-medium text-on-surface flex-1">{conflict.name}</h3>
             <div className="flex items-center gap-2">
-              <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f]">
+              <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
                 {conflict.type === 'character' && '👥 人物'}
                 {conflict.type === 'environment' && '🌍 环境'}
                 {conflict.type === 'internal' && '💭 内心'}
@@ -866,26 +866,26 @@ function ConflictsView({ conflicts, onEdit, onDelete }: { conflicts: Conflict[];
                 {conflict.intensity === 'critical' && '🔴 关键'}
                 {conflict.intensity === 'high' && '🟠 高'}
                 {conflict.intensity === 'medium' && '🟡 中'}
-                {conflict.intensity === 'low' && '⚪ 低'}
+                {conflict.intensity === 'low' && '🟢 低'}
               </span>
               <span className={`text-xs px-2 py-1 rounded ${
                 conflict.status === 'resolved' ? 'bg-green-100 text-green-700' :
                 conflict.status === 'resolving' ? 'bg-blue-100 text-blue-700' :
                 conflict.status === 'escalating' ? 'bg-orange-100 text-orange-700' : 'bg-gray-100 text-gray-700'
               }`}>
-                {conflict.status === 'active' && '⚡ 活跃'}
+                {conflict.status === 'active' && '🔵 活跃'}
                 {conflict.status === 'escalating' && '📈 升级'}
                 {conflict.status === 'resolving' && '📉 缓解'}
                 {conflict.status === 'resolved' && '✅ 已解决'}
               </span>
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                <button onClick={() => onEdit(conflict)} className="p-1.5 text-[#a07d5e] hover:bg-[#faf8f5] rounded transition-colors text-sm" title="编辑">✏️</button>
+                <button onClick={() => onEdit(conflict)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
                 <button onClick={() => onDelete(conflict.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
               </div>
             </div>
           </div>
-          {conflict.description && <p className="text-sm text-[#7a6e5f] mb-2">{conflict.description}</p>}
-          {conflict.characters && <p className="text-xs text-[#7a6e5f]"><span className="font-medium">涉及角色：</span>{conflict.characters}</p>}
+          {conflict.description && <p className="text-sm text-on-surface-secondary mb-2">{conflict.description}</p>}
+          {conflict.characters && <p className="text-xs text-on-surface-secondary"><span className="font-medium">涉及角色：</span>{conflict.characters}</p>}
         </div>
       ))}
     </div>
@@ -896,7 +896,7 @@ function ConflictsView({ conflicts, onEdit, onDelete }: { conflicts: Conflict[];
 function StoryboardsView({ storyboards, onEdit, onDelete }: { storyboards: Storyboard[]; onEdit: (storyboard: Storyboard) => void; onDelete: (id: string) => void }) {
   if (storyboards.length === 0) {
     return (
-      <div className="text-center py-12 text-[#7a6e5f]">
+      <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">📹</div>
         <p>暂无分镜</p>
         <p className="text-sm mt-2">点击"新建"创建第一个分镜</p>
@@ -907,24 +907,24 @@ function StoryboardsView({ storyboards, onEdit, onDelete }: { storyboards: Story
   return (
     <div className="grid gap-3">
       {storyboards.map((board) => (
-        <div key={board.id} className="group p-4 bg-white rounded-lg border border-[#e5ddd2] hover:shadow-md transition-shadow">
+        <div key={board.id} className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow">
           <div className="flex items-start justify-between mb-2">
             <div className="flex-1">
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f] font-mono">#{board.order + 1}</span>
-                <h3 className="font-medium text-[#38342e]">{board.title}</h3>
+                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary font-mono">#{board.order + 1}</span>
+                <h3 className="font-medium text-on-surface">{board.title}</h3>
               </div>
-              {board.description && <p className="text-sm text-[#7a6e5f] mb-2">{board.description}</p>}
+              {board.description && <p className="text-sm text-on-surface-secondary mb-2">{board.description}</p>}
             </div>
             <div className="flex items-start gap-2">
               <div className="flex flex-col gap-1">
-                <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f] whitespace-nowrap">
+                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">
                   {board.shot_type === 'wide' && '🎞️ 远景'}
                   {board.shot_type === 'medium' && '📷 中景'}
                   {board.shot_type === 'close' && '🔍 近景'}
                   {board.shot_type === 'extreme_close' && '🔎 特写'}
                 </span>
-                <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f] whitespace-nowrap">
+                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">
                   {board.camera_movement === 'static' && '📍 固定'}
                   {board.camera_movement === 'pan' && '↔️ 摇镜'}
                   {board.camera_movement === 'tilt' && '↕️ 倾斜'}
@@ -932,10 +932,10 @@ function StoryboardsView({ storyboards, onEdit, onDelete }: { storyboards: Story
                   {board.camera_movement === 'dolly' && '🎬 移动'}
                   {board.camera_movement === 'crane' && '🏗️ 升降'}
                 </span>
-                {board.duration > 0 && <span className="text-xs px-2 py-1 rounded bg-[#faf8f5] text-[#7a6e5f] whitespace-nowrap">⏱️ {board.duration}s</span>}
+                {board.duration > 0 && <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">⏱️ {board.duration}s</span>}
               </div>
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => onEdit(board)} className="p-1.5 text-[#a07d5e] hover:bg-[#faf8f5] rounded transition-colors text-sm" title="编辑">✏️</button>
+                <button onClick={() => onEdit(board)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
                 <button onClick={() => onDelete(board.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
               </div>
             </div>
@@ -950,7 +950,7 @@ function StoryboardsView({ storyboards, onEdit, onDelete }: { storyboards: Story
 function AssetsView({ assets, onEdit, onDelete }: { assets: Asset[]; onEdit: (asset: Asset) => void; onDelete: (id: string) => void }) {
   if (assets.length === 0) {
     return (
-      <div className="text-center py-12 text-[#7a6e5f]">
+      <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">📦</div>
         <p>暂无素材</p>
         <p className="text-sm mt-2">点击"新建"添加第一个素材</p>
@@ -961,9 +961,9 @@ function AssetsView({ assets, onEdit, onDelete }: { assets: Asset[]; onEdit: (as
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       {assets.map((asset) => (
-        <div key={asset.id} className="group p-4 bg-white rounded-lg border border-[#e5ddd2] hover:shadow-md transition-shadow relative">
+        <div key={asset.id} className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow relative">
           <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={() => onEdit(asset)} className="p-1.5 text-[#a07d5e] hover:bg-[#faf8f5] rounded transition-colors text-sm" title="编辑">✏️</button>
+            <button onClick={() => onEdit(asset)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
             <button onClick={() => onDelete(asset.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
           </div>
           <div className="flex flex-col gap-2">
@@ -975,14 +975,14 @@ function AssetsView({ assets, onEdit, onDelete }: { assets: Asset[]; onEdit: (as
                 {asset.type === 'document' && '📄'}
               </div>
               <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-[#38342e] truncate">{asset.name}</h3>
-                <p className="text-xs text-[#7a6e5f]">{(asset.file_size / 1024).toFixed(1)} KB</p>
+                <h3 className="font-medium text-on-surface truncate">{asset.name}</h3>
+                <p className="text-xs text-on-surface-secondary">{(asset.file_size / 1024).toFixed(1)} KB</p>
               </div>
             </div>
             {asset.tags && asset.tags.length > 0 && (
               <div className="flex flex-wrap gap-1">
                 {asset.tags.map((tag, index) => (
-                  <span key={index} className="text-xs px-2 py-0.5 rounded bg-[#faf8f5] text-[#7a6e5f]">{tag}</span>
+                  <span key={index} className="text-xs px-2 py-0.5 rounded bg-surface-primary text-on-surface-secondary">{tag}</span>
                 ))}
               </div>
             )}

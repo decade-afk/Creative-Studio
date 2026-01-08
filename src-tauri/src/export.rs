@@ -183,6 +183,61 @@ fn strip_html_tags(html: &str) -> String {
 }
 
 /**
+ * 将HTML转换为Markdown
+ *
+ * @param html HTML字符串
+ * @return String Markdown格式
+ */
+fn html_to_markdown(html: &str) -> String {
+    let mut result = html.to_string();
+
+    // 转换标题
+    result = result.replace("<h1>", "# ");
+    result = result.replace("</h1>", "\n\n");
+    result = result.replace("<h2>", "## ");
+    result = result.replace("</h2>", "\n\n");
+    result = result.replace("<h3>", "### ");
+    result = result.replace("</h3>", "\n\n");
+
+    // 转换粗体
+    result = result.replace("<strong>", "**");
+    result = result.replace("</strong>", "**");
+    result = result.replace("<b>", "**");
+    result = result.replace("</b>", "**");
+
+    // 转换斜体
+    result = result.replace("<em>", "*");
+    result = result.replace("</em>", "*");
+    result = result.replace("<i>", "*");
+    result = result.replace("</i>", "*");
+
+    // 转换段落
+    result = result.replace("<p>", "");
+    result = result.replace("</p>", "\n\n");
+
+    // 转换换行
+    result = result.replace("<br>", "\n");
+    result = result.replace("<br/>", "\n");
+    result = result.replace("<br />", "\n");
+
+    // 转换列表
+    result = result.replace("<ul>", "\n");
+    result = result.replace("</ul>", "\n");
+    result = result.replace("<li>", "- ");
+    result = result.replace("</li>", "\n");
+
+    // 移除其他HTML标签
+    result = strip_html_tags(&result);
+
+    // 清理多余的空行
+    while result.contains("\n\n\n") {
+        result = result.replace("\n\n\n", "\n\n");
+    }
+
+    result.trim().to_string()
+}
+
+/**
  * 写入文件
  *
  * @param path 文件路径
@@ -236,30 +291,161 @@ pub async fn export_to_word(_data: ExportData) -> Result<ExportResult, String> {
 
 /**
  * 导出为Markdown格式
- * TODO: 实现Markdown生成
  */
 #[tauri::command]
-pub async fn export_to_markdown(_data: ExportData) -> Result<ExportResult, String> {
-    println!("📝 Markdown导出功能开发中...");
-    Err("Markdown导出功能尚未实现，敬请期待".to_string())
+pub async fn export_to_markdown(data: ExportData) -> Result<ExportResult, String> {
+    tracing::info!("📝 开始导出为Markdown格式: {}", data.work.title);
 
-    // TODO: 将HTML转换为Markdown
-    // 可以参考TXT导出的实现，添加Markdown语法
+    // 验证文件路径
+    crate::validation::validate_file_path(&data.options.save_path)?;
+
+    // 构建Markdown内容
+    let mut content = String::new();
+
+    // 1. 添加标题（一级标题）
+    content.push_str(&format!("# {}\n\n", data.work.title));
+
+    // 2. 添加作者信息（如果有）
+    if let Some(author) = &data.options.author {
+        content.push_str(&format!("**作者**: {}\n\n", author));
+    }
+
+    // 3. 添加描述（如果有）
+    if let Some(description) = &data.work.description {
+        content.push_str(&format!("> {}\n\n", description));
+    }
+
+    // 4. 添加目录（如果需要）
+    if data.options.include_toc.unwrap_or(false) {
+        content.push_str("## 目录\n\n");
+        for chapter in &data.chapters {
+            content.push_str(&format!(
+                "- [第{}章 {}](#第{}章-{})\n",
+                chapter.order,
+                chapter.title,
+                chapter.order,
+                chapter.title.replace(" ", "-")
+            ));
+        }
+        content.push_str("\n---\n\n");
+    }
+
+    // 5. 添加章节内容
+    for chapter in &data.chapters {
+        // 章节标题（二级标题）
+        content.push_str(&format!(
+            "\n## 第{}章 {}\n\n",
+            chapter.order, chapter.title
+        ));
+
+        // 将HTML转换为Markdown
+        let markdown = html_to_markdown(&chapter.content);
+        content.push_str(&markdown);
+        content.push_str("\n\n");
+    }
+
+    // 6. 写入文件
+    match write_file(&data.options.save_path, &content) {
+        Ok(file_size) => {
+            tracing::info!("✅ Markdown导出成功: {} ({} bytes)", data.options.save_path, file_size);
+            Ok(ExportResult { file_size })
+        }
+        Err(e) => {
+            tracing::error!("❌ Markdown导出失败: {}", e);
+            Err(format!("写入文件失败: {}", e))
+        }
+    }
 }
 
 /**
  * 导出为HTML格式
- * TODO: 实现HTML生成
  */
 #[tauri::command]
-pub async fn export_to_html(_data: ExportData) -> Result<ExportResult, String> {
-    println!("🌐 HTML导出功能开发中...");
-    Err("HTML导出功能尚未实现，敬请期待".to_string())
+pub async fn export_to_html(data: ExportData) -> Result<ExportResult, String> {
+    tracing::info!("🌐 开始导出为HTML格式: {}", data.work.title);
 
-    // TODO: 生成格式化的HTML文件
-    // 1. 添加CSS样式
-    // 2. 生成目录
-    // 3. 格式化章节
+    // 验证文件路径
+    crate::validation::validate_file_path(&data.options.save_path)?;
+
+    // 构建HTML内容
+    let mut content = String::new();
+
+    // 1. HTML头部
+    content.push_str("<!DOCTYPE html>\n");
+    content.push_str("<html lang=\"zh-CN\">\n");
+    content.push_str("<head>\n");
+    content.push_str("  <meta charset=\"UTF-8\">\n");
+    content.push_str(&format!("  <title>{}</title>\n", data.work.title));
+    content.push_str("  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n");
+    content.push_str("  <style>\n");
+    content.push_str("    body { font-family: 'Microsoft YaHei', Arial, sans-serif; line-height: 1.8; max-width: 800px; margin: 0 auto; padding: 20px; }\n");
+    content.push_str("    h1 { color: #333; border-bottom: 2px solid #8b6342; padding-bottom: 10px; }\n");
+    content.push_str("    h2 { color: #555; margin-top: 30px; }\n");
+    content.push_str("    .author { color: #666; font-style: italic; margin-bottom: 20px; }\n");
+    content.push_str("    .description { background: #f5f5f5; padding: 15px; border-left: 4px solid #8b6342; margin-bottom: 20px; }\n");
+    content.push_str("    .toc { background: #fafafa; padding: 15px; border-radius: 5px; margin-bottom: 20px; }\n");
+    content.push_str("    .toc ul { list-style: none; padding-left: 0; }\n");
+    content.push_str("    .toc li { margin: 8px 0; }\n");
+    content.push_str("    .toc a { color: #8b6342; text-decoration: none; }\n");
+    content.push_str("    .toc a:hover { text-decoration: underline; }\n");
+    content.push_str("  </style>\n");
+    content.push_str("</head>\n");
+    content.push_str("<body>\n");
+
+    // 2. 标题
+    content.push_str(&format!("  <h1>{}</h1>\n", data.work.title));
+
+    // 3. 作者信息（如果有）
+    if let Some(author) = &data.options.author {
+        content.push_str(&format!("  <p class=\"author\">作者: {}</p>\n", author));
+    }
+
+    // 4. 描述（如果有）
+    if let Some(description) = &data.work.description {
+        content.push_str(&format!("  <div class=\"description\">{}</div>\n", description));
+    }
+
+    // 5. 目录（如果需要）
+    if data.options.include_toc.unwrap_or(false) {
+        content.push_str("  <div class=\"toc\">\n");
+        content.push_str("    <h2>目录</h2>\n");
+        content.push_str("    <ul>\n");
+        for chapter in &data.chapters {
+            content.push_str(&format!(
+                "      <li><a href=\"#chapter-{}\">第{}章 {}</a></li>\n",
+                chapter.id, chapter.order, chapter.title
+            ));
+        }
+        content.push_str("    </ul>\n");
+        content.push_str("  </div>\n");
+    }
+
+    // 6. 章节内容
+    for chapter in &data.chapters {
+        content.push_str(&format!(
+            "  <h2 id=\"chapter-{}\">第{}章 {}</h2>\n",
+            chapter.id, chapter.order, chapter.title
+        ));
+        content.push_str(&format!("  <div class=\"chapter\">\n"));
+        content.push_str(&format!("    {}\n", chapter.content));
+        content.push_str("  </div>\n");
+    }
+
+    // 7. HTML尾部
+    content.push_str("</body>\n");
+    content.push_str("</html>\n");
+
+    // 8. 写入文件
+    match write_file(&data.options.save_path, &content) {
+        Ok(file_size) => {
+            tracing::info!("✅ HTML导出成功: {} ({} bytes)", data.options.save_path, file_size);
+            Ok(ExportResult { file_size })
+        }
+        Err(e) => {
+            tracing::error!("❌ HTML导出失败: {}", e);
+            Err(format!("写入文件失败: {}", e))
+        }
+    }
 }
 
 /**

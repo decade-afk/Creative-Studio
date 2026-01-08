@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build:*)",
+      "Bash(choco --version:*)",
+      "Bash(choco install:*)",
+      "Bash(npm run tauri:*)",
+      "Bash(cargo tree:*)",
+      "Bash(curl:*)",
+      "Bash(rustup show:*)",
+      "Bash(cargo clean:*)",
+      "Bash(timeout:*)",
+      "Bash(ping:*)",
+      "Bash(cargo metadata:*)",
+      "Bash(dir /s /b \"D:\\OpenProject\\Creative-Studio-desktop\\src-tauri\\target\\release\\build\\protobuf*\")",
+      "Bash(findstr:*)",
+      "Bash(powershell:*)",
+      "Bash(scoop:*)",
+      "Bash(cmd //c build_with_protoc.bat)",
+      "Bash(cmd //c build_with_protobuf.bat)",
+      "Bash(taskkill:*)",
+      "Bash(dir:*)",
+      "Bash(test:*)",
+      "Bash(set PROTOC=%cd%targetprotobufbinprotoc.exe)",
+      "Bash(set PROTOC_INCLUDE=%cd%targetprotobufinclude)",
+      "Bash(npm run build:*)",
+      "Bash(npm run dev:*)",
+      "Bash(cat:*)",
+      "Bash(npx tsc --noEmit)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
