@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
+use tauri::Manager;
 
 /** 单条对话消息 */
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,4 +243,61 @@ fn truncate_detail(detail: &str) -> String {
     } else {
         detail.to_string()
     }
+}
+
+// ============================================================================
+// 非流式单次调用（Agent API 用）
+// ============================================================================
+
+/**
+ * 从应用配置读取 AI 服务配置并单次调用（收集全部输出）
+ *
+ * 供 agent_api 的续写/审稿/大纲端点复用；任何失败返回 Err(String)
+ */
+pub async fn chat_once_from_config(
+    app: &tauri::AppHandle,
+    messages: serde_json::Value,
+) -> Result<String, String> {
+    // 读取 config.json 的 ai 段
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    let config_path = dir.join("config.json");
+    let config: serde_json::Value = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("读取配置失败: {}", e))
+        .and_then(|s| serde_json::from_str(&s).map_err(|e| format!("解析配置失败: {}", e)))?;
+
+    let base_url = config["ai"]["baseUrl"].as_str().unwrap_or("").to_string();
+    let api_key = config["ai"]["apiKey"].as_str().unwrap_or("").to_string();
+    let model = config["ai"]["model"].as_str().unwrap_or("").to_string();
+    if base_url.is_empty() || model.is_empty() {
+        return Err("AI 服务未配置（设置 → AI 服务）".into());
+    }
+
+    let url = format!("{}/chat/completions", normalize_base_url(&base_url));
+    let body = serde_json::json!({ "model": model, "messages": messages, "stream": false });
+
+    let client = reqwest::Client::new();
+    let mut builder = client.post(&url).json(&body);
+    if !api_key.is_empty() {
+        builder = builder.bearer_auth(&api_key);
+    }
+
+    let response = builder
+        .send()
+        .await
+        .map_err(|e| format!("连接 AI 服务失败: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("AI 服务返回错误 ({})", response.status()));
+    }
+
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("解析 AI 响应失败: {}", e))?;
+    Ok(json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .to_string())
 }

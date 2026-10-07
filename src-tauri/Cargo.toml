@@ -56,3 +56,6 @@ thiserror = "1.0"       # 错误类型派生宏
 tracing = "0.1"         # 结构化日志
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tauri-plugin-clipboard-manager = "2.4.1"
+axum = "0.8.9"
+rusqlite = { version = "0.32", features = ["bundled"] }
+tokio = { version = "1.53.2", features = ["net", "rt"] }

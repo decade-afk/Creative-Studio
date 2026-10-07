@@ -92,6 +92,15 @@ const server = http.createServer((req, res) => {
       console.log('[mock] chat:', body.slice(0, 100));
       // 必须在请求体读完后才能按内容选择应答
       const reply = pickReply(body);
+
+      // 非流式请求：直接返回标准 JSON（agent_api 用 stream:false）
+      let isStream = true;
+      try { isStream = JSON.parse(body).stream !== false; } catch {}
+      if (!isStream) {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: reply } }] }));
+        return;
+      }
       // 按固定长度切片流式推送
       const chunks = [];
       for (let i = 0; i < reply.length; i += 60) {

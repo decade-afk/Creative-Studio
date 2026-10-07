@@ -14,6 +14,7 @@
 
 // 模块声明
 mod ai;
+mod agent_api;
 mod submission;
 mod export;
 mod validation;
@@ -63,6 +64,12 @@ pub fn run() {
     tracing::info!("🔨 构建 Tauri 应用...");
 
     tauri::Builder::default()
+        // Agent API：应用就绪后启动本地 REST 服务（供外部 AI Agent 调用）
+        .setup(|app| {
+            agent_api::start(app.handle());
+            Ok(())
+        })
+
         // ========== 第三步：初始化插件 ==========
 
         // clipboard 插件：剪贴板读写（投递复制，无 WebView 权限弹窗）

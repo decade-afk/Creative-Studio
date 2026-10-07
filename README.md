@@ -63,6 +63,36 @@
 
 ---
 
+## 🤖 Agent API 与 MCP（让外部 Agent 使用本软件）
+
+应用运行时在 **127.0.0.1:8765** 提供本地 REST API，外部 AI Agent（Claude Code、任意 LLM 工具循环）可以直接读写作品/章节并调用软件内置的 AI 工作流——等同 inkos 的"agent 操作创作库"能力，数据与软件 UI 完全互通（同一 SQLite 库）。
+
+### REST 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | /api/works | 列出（含字数统计）/ 创建作品 |
+| GET | /api/works/{id}/chapters | 章节列表 |
+| GET/POST | /api/chapters, /api/chapters/{id} | 读取（HTML+纯文本）/ 创建 / 软删除 |
+| PUT | /api/chapters/{id}/content | 替换正文（纯文本自动分段） |
+| POST | /api/ai/continue/{chapterId} | AI 续写并追加保存 |
+| POST | /api/ai/review/{chapterId} | AI 审稿，返回报告 |
+| POST | /api/ai/outline | 一句话创意生成大纲并入库 |
+| GET | /api/search?q= | 全局搜索 |
+| GET | /api/stats/{workId} | 作品统计 |
+
+AI 端点使用软件内配置的模型（设置 → AI 服务）。仅监听本机回环地址，不暴露网络。
+
+### MCP 接入（Claude Code）
+
+```bash
+claude mcp add creative-studio -- node <项目路径>/scripts/mcp-server.mjs
+```
+
+之后 agent 即可使用 12 个工具：list_works / create_work / list_chapters / read_chapter / create_chapter / write_chapter / delete_chapter / ai_continue / ai_review / ai_outline / search / work_stats。
+
+示例对话："帮我看看 Creative Studio 里的作品，把第一章续写 500 字然后审一遍稿" —— agent 会依次调用 list_works → list_chapters → ai_continue → ai_review 完成。
+
 ## 开发
 
 ```bash
