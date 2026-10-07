@@ -70,6 +70,12 @@ export interface ExportOptions {
   /** 导出文件保存路径（用户选择） */
   savePath?: string;
 
+  /** 仅导出该章节（不传则导出全书） */
+  chapterId?: string;
+
+  /** 章节标题（单章导出时的默认文件名组成部分） */
+  chapterTitle?: string;
+
   /** 是否包含目录 */
   includeTOC?: boolean;
 

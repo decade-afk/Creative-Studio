@@ -49,9 +49,20 @@ export async function exportWork(
 
     // 2. 加载所有章节
     onProgress?.({ step: '正在加载章节...', progress: 20 });
-    const chapters = await getChaptersByWorkId(options.workId);
+    let chapters = await getChaptersByWorkId(options.workId);
     if (chapters.length === 0) {
       throw new Error('作品没有章节，无法导出');
+    }
+
+    // 单章导出：按 chapterId 过滤
+    const scopeName = options.chapterId
+      ? chapters.find((c) => c.id === options.chapterId)?.title
+      : undefined;
+    if (options.chapterId) {
+      chapters = chapters.filter((c) => c.id === options.chapterId);
+      if (chapters.length === 0) {
+        throw new Error('章节不存在，无法导出');
+      }
     }
 
     // 3. 如果未指定保存路径，弹出文件选择对话框
@@ -59,10 +70,13 @@ export async function exportWork(
     if (!savePath) {
       onProgress?.({ step: '请选择保存位置...', progress: 30 });
       const formatInfo = EXPORT_FORMAT_INFO[options.format];
+      const baseName = options.chapterTitle || scopeName
+        ? `${work.title} - ${options.chapterTitle || scopeName}`
+        : work.title;
 
       const selectedPath = await save({
-        title: '导出作品',
-        defaultPath: `${work.title}.${formatInfo.extension}`,
+        title: options.chapterId ? '导出章节' : '导出作品',
+        defaultPath: `${baseName}.${formatInfo.extension}`,
         filters: [{
           name: formatInfo.displayName,
           extensions: [formatInfo.extension],

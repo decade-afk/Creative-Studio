@@ -165,6 +165,9 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
         console.warn('⚠️ 重启自动备份调度器失败:', error);
       });
 
+      // 通知编辑器等组件实时应用新配置（字体/字号/行高/自动保存间隔等）
+      window.dispatchEvent(new CustomEvent('creative-studio:config-changed'));
+
       showToast('配置已保存', 'success');
     } catch (error: any) {
       showToast(`保存失败: ${error}`, 'error');
@@ -669,6 +672,24 @@ function EditorTab({ config, setConfig }: EditorTabProps) {
         <label htmlFor="spellCheck" className="text-sm font-medium text-on-surface cursor-pointer">
           启用拼写检查
         </label>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-on-surface mb-2">每日写作目标（字）</label>
+        <input
+          type="number"
+          min="0"
+          step="100"
+          value={config.editor.dailyGoal}
+          onChange={(e) => setConfig({
+            ...config,
+            editor: { ...config.editor, dailyGoal: parseInt(e.target.value) || 0 }
+          })}
+          className="form-input max-w-xs"
+        />
+        <p className="mt-2 text-sm text-on-surface-secondary">
+          {config.editor.dailyGoal === 0 ? '不启用每日目标' : `每天 ${config.editor.dailyGoal} 字，完成情况显示在写作页顶栏`}
+        </p>
       </div>
     </div>
   );

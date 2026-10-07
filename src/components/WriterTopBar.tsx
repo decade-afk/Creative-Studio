@@ -7,6 +7,8 @@
 import { useEffect, useState } from 'react';
 import { useWriterStore } from '../stores/writerStore';
 import { getWorkTotalWordCount } from '../services/chapterService';
+import { loadConfig } from '../services/configService';
+import { getTodayWords } from '../utils/dailyWords';
 
 interface WriterTopBarProps {
   onToggleDrawer: () => void;
@@ -34,6 +36,24 @@ export default function WriterTopBar({
 
   // 作品总字数（章节切换/保存后刷新）
   const [totalWords, setTotalWords] = useState<number | null>(null);
+  // 每日目标与今日字数
+  const [dailyGoal, setDailyGoal] = useState(0);
+  const [todayWords, setTodayWords] = useState(0);
+
+  useEffect(() => {
+    loadConfig()
+      .then((c) => setDailyGoal(c.editor.dailyGoal || 0))
+      .catch(() => undefined);
+    // 设置保存后实时刷新目标
+    const handler = () => {
+      loadConfig()
+        .then((c) => setDailyGoal(c.editor.dailyGoal || 0))
+        .catch(() => undefined);
+    };
+    window.addEventListener('creative-studio:config-changed', handler);
+    return () => window.removeEventListener('creative-studio:config-changed', handler);
+  }, []);
+
   useEffect(() => {
     if (!currentWorkId) {
       setTotalWords(null);
@@ -42,7 +62,10 @@ export default function WriterTopBar({
     let cancelled = false;
     getWorkTotalWordCount(currentWorkId)
       .then((count) => {
-        if (!cancelled) setTotalWords(count);
+        if (!cancelled) {
+          setTotalWords(count);
+          setTodayWords(getTodayWords(count));
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -72,6 +95,11 @@ export default function WriterTopBar({
         {totalWords !== null && (
           <span className="text-xs text-on-surface-secondary whitespace-nowrap">
             本章 {wordCount} 字 · 全书 {totalWords} 字
+            {dailyGoal > 0 && (
+              <span className={todayWords >= dailyGoal ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
+                {' '}· 今日 {todayWords}/{dailyGoal} 字{todayWords >= dailyGoal ? ' 🎉' : ''}
+              </span>
+            )}
           </span>
         )}
       </div>

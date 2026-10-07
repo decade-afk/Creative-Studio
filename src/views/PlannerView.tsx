@@ -55,7 +55,7 @@ import { getOutlineNodesByWorkId, createOutlineNode, updateOutlineNode, deleteOu
 import { getScenesByWorkId, createScene, updateScene, deleteScene } from '../services/sceneService';
 import { getMilestonesByWorkId, createMilestone, updateMilestone, deleteMilestone } from '../services/milestoneService';
 import { getWorks } from '../services/workService';
-import { getChaptersByWorkId } from '../services/chapterService';
+import { getChaptersByWorkId, createChapter } from '../services/chapterService';
 import { getCharactersByWorkId, createCharacter, updateCharacter, deleteCharacter } from '../services/characterService';
 import { useWriterStore } from '../stores/writerStore';
 import type { Work } from '../types/storage';
@@ -438,8 +438,32 @@ export default function PlannerView() {
   }, [currentWorkId, outlineTree, reloadCurrentTab, showToast]);
 
   /** 同级排序：与相邻节点交换 order 值 */
-  const handleMoveNode = useCallback(async (node: OutlineNode, direction: -1 | 1) => {
-    const siblings = findSiblings(node, outlineTree);
+  /** 大纲节点一键转为章节（描述作为正文首段），创作视图立即可见 */
+  const handleNodeToChapter = useCallback(async (node: OutlineNode) => {
+    if (!currentWorkId) return;
+    try {
+      const existing = await getChaptersByWorkId(currentWorkId);
+      await createChapter(
+        currentWorkId,
+        node.title,
+        node.description ? '<p>' + node.description + '</p>' : '',
+        existing.length + 1
+      );
+
+      // 若创作视图正打开同一作品，刷新其章节列表使新章节立即可见
+      const store = useWriterStore.getState();
+      if (store.currentWorkId === currentWorkId) {
+        store.setChapters(await getChaptersByWorkId(currentWorkId));
+      }
+
+      showToast('已创建章节「' + node.title + '」', 'success');
+    } catch (error: any) {
+      showToast(error.message || '转章节失败', 'error');
+      console.error(error);
+    }
+  }, [currentWorkId, showToast]);
+
+  const handleMoveNode = useCallback(async (node: OutlineNode, direction: -1 | 1) => {    const siblings = findSiblings(node, outlineTree);
     const index = siblings.findIndex((s) => s.id === node.id);
     const target = siblings[index + direction];
     if (!target) return;
@@ -723,6 +747,7 @@ export default function PlannerView() {
             })}
             onAddChild={handleAddChild}
             onMove={handleMoveNode}
+            onToChapter={handleNodeToChapter}
           />
         )}
 
@@ -1238,6 +1263,7 @@ function OutlineTreeView({
   onDelete,
   onAddChild,
   onMove,
+  onToChapter,
 }: {
   tree: OutlineTreeNode[];
   collapsedIds: Set<string>;
@@ -1246,6 +1272,7 @@ function OutlineTreeView({
   onDelete: (node: OutlineNode) => void;
   onAddChild: (node: OutlineNode) => void;
   onMove: (node: OutlineNode, direction: -1 | 1) => void;
+  onToChapter: (node: OutlineNode) => void;
 }) {
   if (tree.length === 0) {
     return (
@@ -1302,6 +1329,7 @@ function OutlineTreeView({
 
             <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
               <button onClick={() => onAddChild(node)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="添加子节点">➕</button>
+              <button onClick={() => onToChapter(node)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="转为章节">📖</button>
               <button onClick={() => onMove(node, -1)} className="p-1.5 text-on-surface-secondary hover:bg-surface-primary rounded transition-colors text-sm" title="上移">↑</button>
               <button onClick={() => onMove(node, 1)} className="p-1.5 text-on-surface-secondary hover:bg-surface-primary rounded transition-colors text-sm" title="下移">↓</button>
               <button onClick={() => onEdit(node)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>

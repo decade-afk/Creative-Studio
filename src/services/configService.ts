@@ -37,6 +37,8 @@ export interface AppConfig {
     autoSaveInterval: number;
     /** 拼写检查 */
     spellCheck: boolean;
+    /** 每日写作字数目标（0 表示不启用） */
+    dailyGoal: number;
   };
 
   /** 导出设置 */
@@ -111,8 +113,9 @@ const DEFAULT_CONFIG: AppConfig = {
     fontSize: 16,
     fontFamily: "'Segoe UI', 'Microsoft YaHei', sans-serif",
     lineHeight: 1.8,
-    autoSaveInterval: 30,
+    autoSaveInterval: 2,
     spellCheck: true,
+    dailyGoal: 0,
   },
   export: {
     defaultFormat: 'pdf',

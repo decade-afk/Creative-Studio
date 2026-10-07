@@ -46,10 +46,31 @@
  * ```
  */
 
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import ScriptToolbar from './ScriptToolbar';
 import NovelToolbar from './NovelToolbar';
 import { useWriterStore } from '../stores/writerStore';
+import { loadConfig } from '../services/configService';
+
+// ============================================================================
+// 编辑器外观配置（来自设置页，保存后实时生效）
+// ============================================================================
+
+interface EditorAppearance {
+  fontSize: number;
+  fontFamily: string;
+  lineHeight: number;
+  autoSaveInterval: number; // 秒，0 = 禁用自动保存
+  spellCheck: boolean;
+}
+
+const DEFAULT_APPEARANCE: EditorAppearance = {
+  fontSize: 16,
+  fontFamily: "'Segoe UI', 'Microsoft YaHei', sans-serif",
+  lineHeight: 1.8,
+  autoSaveInterval: 2,
+  spellCheck: true,
+};
 
 // ============================================================================
 // Props 类型定义
@@ -156,6 +177,39 @@ export default function WriterEditor({ onSave, editorRef: externalEditorRef }: W
    */
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>();
 
+  /**
+   * 编辑器外观配置（设置页可改，保存后通过事件实时生效）
+   */
+  const [appearance, setAppearance] = useState<EditorAppearance>(DEFAULT_APPEARANCE);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const applyConfig = async () => {
+      try {
+        const config = await loadConfig();
+        if (!cancelled) {
+          setAppearance({
+            fontSize: config.editor.fontSize,
+            fontFamily: config.editor.fontFamily,
+            lineHeight: config.editor.lineHeight,
+            autoSaveInterval: config.editor.autoSaveInterval,
+            spellCheck: config.editor.spellCheck,
+          });
+        }
+      } catch {
+        // 读取失败时保持默认
+      }
+    };
+
+    applyConfig();
+    window.addEventListener('creative-studio:config-changed', applyConfig);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('creative-studio:config-changed', applyConfig);
+    };
+  }, []);
+
   // ==========================================================================
   // 数据获取
   // ==========================================================================
@@ -207,12 +261,15 @@ export default function WriterEditor({ onSave, editorRef: externalEditorRef }: W
     // 如果 editorContent 为空（初始状态或切换章节），不触发保存
     if (!editorContent) return;
 
+    // 自动保存被禁用（间隔为 0）
+    if (appearance.autoSaveInterval <= 0) return;
+
     // 清除之前的定时器（防抖）
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
     }
 
-    // 设置新的定时器（2秒后保存）
+    // 设置新的定时器（按设置的间隔保存）
     saveTimerRef.current = setTimeout(() => {
       // 检查编辑器引用是否存在
       if (editorRef.current) {
@@ -223,7 +280,7 @@ export default function WriterEditor({ onSave, editorRef: externalEditorRef }: W
         // 调用保存回调
         onSave?.(newContent);
       }
-    }, 2000);  // 2秒延迟
+    }, Math.max(1, appearance.autoSaveInterval) * 1000);
 
     // 清理函数：组件卸载或 effect 重新执行时清除定时器
     return () => {
@@ -231,7 +288,7 @@ export default function WriterEditor({ onSave, editorRef: externalEditorRef }: W
         clearTimeout(saveTimerRef.current);
       }
     };
-  }, [editorContent, isComposing, onSave]);  // 依赖项：监听内容变化
+  }, [editorContent, isComposing, onSave, appearance.autoSaveInterval]);  // 依赖项：监听内容变化
 
   // ==========================================================================
   // 事件处理函数
@@ -445,9 +502,15 @@ export default function WriterEditor({ onSave, editorRef: externalEditorRef }: W
       <div className="flex-1 overflow-auto">
         <div
           ref={editorRef}
-          className="max-w-6xl mx-auto px-12 py-12 min-h-full focus:outline-none text-on-surface leading-relaxed"
+          className="max-w-6xl mx-auto px-12 py-12 min-h-full focus:outline-none text-on-surface"
+          style={{
+            fontSize: `${appearance.fontSize}px`,
+            fontFamily: appearance.fontFamily,
+            lineHeight: appearance.lineHeight,
+          }}
           contentEditable
           suppressContentEditableWarning
+          spellCheck={appearance.spellCheck}
           onInput={handleEditorInput}
           onCompositionStart={handleCompositionStart}
           onCompositionEnd={handleCompositionEnd}

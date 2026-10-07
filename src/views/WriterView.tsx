@@ -113,6 +113,7 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
 
     // 计算属性
     getCurrentWork,
+    getCurrentChapter,
   } = useWriterStore();
 
   // ========== 本地 Ref ==========
@@ -126,6 +127,15 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
 
   // 版本历史对话框
   const [showVersionsDialog, setShowVersionsDialog] = useState(false);
+
+  // 导出范围：整本作品 / 当前章节
+  const [exportScope, setExportScope] = useState<'work' | 'chapter'>('work');
+  const currentChapterData = getCurrentChapter();
+
+  // 每次打开导出对话框时重置为整本导出
+  useEffect(() => {
+    if (showExportDialog) setExportScope('work');
+  }, [showExportDialog]);
   
   /**
      * 计算字数
@@ -506,7 +516,9 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
         {
           workId: currentWorkId,
           format,
-          includeTOC: true,
+          includeTOC: exportScope === 'work',
+          chapterId: exportScope === 'chapter' ? currentChapterId : undefined,
+          chapterTitle: exportScope === 'chapter' ? currentChapterData?.title : undefined,
         },
         (progress) => {
           setExportProgress(progress);
@@ -527,7 +539,7 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
       showToast(`导出失败: ${error.message}`, 'error');
       setExportProgress(null);
     }
-  }, [currentWorkId, showToast, setExportProgress, setShowExportDialog]);
+  }, [currentWorkId, currentChapterId, currentChapterData, exportScope, showToast, setExportProgress, setShowExportDialog]);
 
   /**
    * 当editorContent状态更新时，同步到DOM
@@ -660,6 +672,34 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
                 </div>
                 <div className="text-sm text-[#9a8c79] mt-1">
                   {chapters.length} 个章节
+                </div>
+              </div>
+
+              {/* Export Scope */}
+              <div className="mb-6">
+                <div className="text-sm font-semibold text-[#38342e] mb-3">导出范围</div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setExportScope('work')}
+                    className={`flex-1 p-3 rounded-lg border-2 transition-all text-left ${
+                      exportScope === 'work' ? 'border-primary-500 bg-primary-50' : 'border-[#e5ddd2]'
+                    }`}
+                  >
+                    <div className="text-sm font-medium text-[#38342e]">📚 整本作品</div>
+                    <div className="text-xs text-[#9a8c79] mt-0.5">全部 {chapters.length} 个章节</div>
+                  </button>
+                  <button
+                    onClick={() => setExportScope('chapter')}
+                    disabled={!currentChapterId}
+                    className={`flex-1 p-3 rounded-lg border-2 transition-all text-left disabled:opacity-50 ${
+                      exportScope === 'chapter' ? 'border-primary-500 bg-primary-50' : 'border-[#e5ddd2]'
+                    }`}
+                  >
+                    <div className="text-sm font-medium text-[#38342e]">📄 当前章节</div>
+                    <div className="text-xs text-[#9a8c79] mt-0.5 truncate">
+                      {currentChapterData?.title || '未选择章节'}
+                    </div>
+                  </button>
                 </div>
               </div>
 
