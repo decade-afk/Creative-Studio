@@ -61,12 +61,23 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { convertFileSrc } from '@tauri-apps/api/core';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import type { Clue, Conflict, Storyboard, Asset } from '../types/storage';
+import type { Work } from '../types/storage';
 import { getCluesByWorkId, createClue, updateClue, deleteClue } from '../services/clueService';
 import { getConflictsByWorkId, createConflict, updateConflict, deleteConflict } from '../services/conflictService';
 import { getStoryboardsByWorkId, createStoryboard, updateStoryboard, deleteStoryboard } from '../services/storyboardService';
-import { getAssetsByWorkId, createAsset, updateAsset, deleteAsset } from '../services/assetService';
+import { getAssetsByWorkId, updateAsset, deleteAsset } from '../services/assetService';
+import { getScenesByWorkId } from '../services/sceneService';
+import { getChaptersByWorkId } from '../services/chapterService';
+import {
+  importAssetWithDialog,
+  removeAsset,
+  formatFileSize,
+} from '../services/fileStorageService';
 import { getWorks } from '../services/workService';
+import { useWriterStore } from '../stores/writerStore';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -79,6 +90,7 @@ type EditingItem = {
 
 export default function DirectorView() {
   const [currentWorkId, setCurrentWorkId] = useState<string>('');
+  const [works, setWorks] = useState<Work[]>([]);
   const [currentTab, setCurrentTab] = useState<Tab>('clues');
   const [loading, setLoading] = useState(false);
 
@@ -87,21 +99,33 @@ export default function DirectorView() {
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   const [storyboards, setStoryboards] = useState<Storyboard[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [scenes, setScenes] = useState<{ id: string; name: string }[]>([]);
+  const [chapters, setChapters] = useState<{ id: string; title: string }[]>([]);
 
   // UI 状态
   const [editingItem, setEditingItem] = useState<EditingItem>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingItem, setDeletingItem] = useState<{ id: string; title: string } | null>(null);
   const { showToast, ToastComponent } = useToast();
 
-  // 加载作品
+  // 与全局当前作品保持一致
   useEffect(() => {
     async function loadWork() {
-      const works = await getWorks();
-      if (works.length > 0) {
-        setCurrentWorkId(works[0].id);
+      const loadedWorks = await getWorks();
+      setWorks(loadedWorks);
+      const storeId = useWriterStore.getState().currentWorkId;
+      if (storeId && loadedWorks.some((w) => w.id === storeId)) {
+        setCurrentWorkId(storeId);
+      } else if (loadedWorks.length > 0) {
+        setCurrentWorkId(loadedWorks[0].id);
       }
     }
     loadWork();
+  }, []);
+
+  /** 切换作品：同步全局 store */
+  const handleWorkChange = useCallback((workId: string) => {
+    setCurrentWorkId(workId);
+    useWriterStore.getState().setCurrentWorkId(workId);
   }, []);
 
   // 加载数据
@@ -110,23 +134,28 @@ export default function DirectorView() {
     loadAllData();
   }, [currentWorkId]);
 
-  // 加载所有数据
+  // 加载所有数据（含关联用的章节与场景列表）
   const loadAllData = useCallback(async () => {
     if (!currentWorkId) return;
 
     setLoading(true);
     try {
-      const [cluesData, conflictsData, storyboardsData, assetsData] = await Promise.all([
-        getCluesByWorkId(currentWorkId),
-        getConflictsByWorkId(currentWorkId),
-        getStoryboardsByWorkId(currentWorkId),
-        getAssetsByWorkId(currentWorkId),
-      ]);
+      const [cluesData, conflictsData, storyboardsData, assetsData, scenesData, chaptersData] =
+        await Promise.all([
+          getCluesByWorkId(currentWorkId),
+          getConflictsByWorkId(currentWorkId),
+          getStoryboardsByWorkId(currentWorkId),
+          getAssetsByWorkId(currentWorkId),
+          getScenesByWorkId(currentWorkId),
+          getChaptersByWorkId(currentWorkId),
+        ]);
 
       setClues(cluesData);
       setConflicts(conflictsData);
       setStoryboards(storyboardsData);
       setAssets(assetsData);
+      setScenes(scenesData.map((s) => ({ id: s.id, name: s.name })));
+      setChapters(chaptersData.map((c) => ({ id: c.id, title: c.title })));
     } catch (error) {
       showToast('加载数据失败', 'error');
       console.error('加载失败:', error);
@@ -212,18 +241,16 @@ export default function DirectorView() {
           showToast('分镜创建成功', 'success');
           break;
 
-        case 'assets':
-          await createAsset({
-            work_id: currentWorkId,
-            name: '新素材',
-            type: 'image',
-            file_path: '',
-            file_size: 0,
-            mime_type: '',
-            tags: [],
-          });
-          showToast('素材创建成功', 'success');
+        case 'assets': {
+          // 素材：走真实文件导入（对话框选择 → 复制进应用数据目录 → 建库记录）
+          const imported = await importAssetWithDialog(currentWorkId);
+          if (imported) {
+            showToast(`素材已导入：${imported.name}`, 'success');
+          } else {
+            return; // 用户取消，不提示错误
+          }
           break;
+        }
       }
 
       await reloadCurrentTab();
@@ -248,6 +275,8 @@ export default function DirectorView() {
             name: clue.name,
             source: clue.source,
             status: clue.status,
+            setup_scene_id: clue.setup_scene_id,
+            payoff_scene_id: clue.payoff_scene_id,
             description: clue.description,
           });
           showToast('伏笔更新成功', 'success');
@@ -270,6 +299,8 @@ export default function DirectorView() {
         case 'storyboards': {
           const board = item as Storyboard;
           await updateStoryboard(board.id, {
+            chapter_id: board.chapter_id,
+            scene_id: board.scene_id,
             title: board.title,
             description: board.description,
             shot_type: board.shot_type,
@@ -303,30 +334,37 @@ export default function DirectorView() {
 
   // 确认删除
   const handleConfirmDelete = useCallback(async () => {
-    if (!deletingId) return;
+    if (!deletingItem) return;
 
     setLoading(true);
     try {
       switch (currentTab) {
         case 'clues':
-          await deleteClue(deletingId);
+          await deleteClue(deletingItem.id);
           showToast('伏笔已删除', 'success');
           break;
         case 'conflicts':
-          await deleteConflict(deletingId);
+          await deleteConflict(deletingItem.id);
           showToast('冲突已删除', 'success');
           break;
         case 'storyboards':
-          await deleteStoryboard(deletingId);
+          await deleteStoryboard(deletingItem.id);
           showToast('分镜已删除', 'success');
           break;
-        case 'assets':
-          await deleteAsset(deletingId);
-          showToast('素材已删除', 'success');
+        case 'assets': {
+          // 素材：连同物理文件一起删除
+          const asset = assets.find((a) => a.id === deletingItem.id);
+          if (asset) {
+            await removeAsset(asset);
+            showToast('素材已删除（含文件）', 'success');
+          } else {
+            await deleteAsset(deletingItem.id);
+          }
           break;
+        }
       }
 
-      setDeletingId(null);
+      setDeletingItem(null);
       await reloadCurrentTab();
     } catch (error) {
       showToast('删除失败', 'error');
@@ -334,22 +372,48 @@ export default function DirectorView() {
     } finally {
       setLoading(false);
     }
-  }, [deletingId, currentTab, reloadCurrentTab, showToast]);
+  }, [deletingItem, currentTab, assets, reloadCurrentTab, showToast]);
+
+  /** 在系统文件管理器中显示素材文件 */
+  const handleRevealAsset = useCallback(async (asset: Asset) => {
+    try {
+      await revealItemInDir(asset.file_path);
+    } catch (error) {
+      showToast('打开文件夹失败', 'error');
+      console.error(error);
+    }
+  }, [showToast]);
+
+  /** 分镜同级排序 */
+  const handleMoveStoryboard = useCallback(async (board: Storyboard, direction: -1 | 1) => {
+    const sorted = [...storyboards].sort((a, b) => a.order - b.order);
+    const index = sorted.findIndex((s) => s.id === board.id);
+    const target = sorted[index + direction];
+    if (!target) return;
+    try {
+      await updateStoryboard(board.id, { order: target.order });
+      await updateStoryboard(target.id, { order: board.order });
+      await reloadCurrentTab();
+    } catch (error) {
+      showToast('排序失败', 'error');
+      console.error(error);
+    }
+  }, [storyboards, reloadCurrentTab, showToast]);
 
   return (
     <div className="flex-1 flex flex-col bg-surface-primary overflow-hidden">
       {ToastComponent}
 
       {/* 确认删除对话框 */}
-      {deletingId && (
+      {deletingItem && (
         <ConfirmDialog
           title="确认删除"
-          message="确定要删除这个项目吗？此操作无法撤销。"
+          message={`确定要删除「${deletingItem.title}」吗？${currentTab === 'assets' ? '对应文件也将一并删除，' : ''}此操作无法撤销。`}
           confirmText="删除"
           cancelText="取消"
           type="danger"
           onConfirm={handleConfirmDelete}
-          onCancel={() => setDeletingId(null)}
+          onCancel={() => setDeletingItem(null)}
         />
       )}
 
@@ -361,17 +425,29 @@ export default function DirectorView() {
           backgroundColor: 'var(--surface-secondary)',
         }}
       >
-        <div className="flex gap-2">
-          <button
-            onClick={() => setCurrentTab('clues')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              currentTab === 'clues'
-                ? 'bg-primary-500 text-white'
-                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
-            }`}
+        <div className="flex items-center gap-3">
+          <select
+            value={currentWorkId}
+            onChange={(e) => handleWorkChange(e.target.value)}
+            className="px-3 py-2 rounded-lg text-sm font-medium bg-surface-primary text-on-surface border border-outline focus:outline-none focus:ring-2 focus:ring-primary-500 max-w-[180px]"
+            title="切换作品"
           >
-            🔗 伏笔
-          </button>
+            {works.length === 0 && <option value="">暂无作品</option>}
+            {works.map((w) => (
+              <option key={w.id} value={w.id}>{w.icon} {w.title}</option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setCurrentTab('clues')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                currentTab === 'clues'
+                  ? 'bg-primary-500 text-white'
+                  : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
+              }`}
+            >
+              🔗 伏笔
+            </button>
           <button
             onClick={() => setCurrentTab('conflicts')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -402,14 +478,15 @@ export default function DirectorView() {
           >
             📦 素材
           </button>
+          </div>
         </div>
 
         <button
           onClick={handleQuickCreate}
-          disabled={loading}
+          disabled={loading || !currentWorkId}
           className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {loading ? '处理中...' : '+ 新建'}
+          {loading ? '处理中...' : currentTab === 'assets' ? '+ 导入素材' : '+ 新建'}
         </button>
       </div>
 
@@ -424,8 +501,12 @@ export default function DirectorView() {
         {!loading && currentTab === 'clues' && (
           <CluesView
             clues={clues}
+            scenes={scenes}
             onEdit={(item) => setEditingItem({ type: 'clues', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(id) => {
+              const c = clues.find((x) => x.id === id);
+              setDeletingItem({ id, title: c?.name || '伏笔' });
+            }}
           />
         )}
 
@@ -433,15 +514,23 @@ export default function DirectorView() {
           <ConflictsView
             conflicts={conflicts}
             onEdit={(item) => setEditingItem({ type: 'conflicts', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(id) => {
+              const c = conflicts.find((x) => x.id === id);
+              setDeletingItem({ id, title: c?.name || '冲突' });
+            }}
           />
         )}
 
         {!loading && currentTab === 'storyboards' && (
           <StoryboardsView
             storyboards={storyboards}
+            chapters={chapters}
             onEdit={(item) => setEditingItem({ type: 'storyboards', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(id) => {
+              const s = storyboards.find((x) => x.id === id);
+              setDeletingItem({ id, title: s?.title || '分镜' });
+            }}
+            onMove={handleMoveStoryboard}
           />
         )}
 
@@ -449,7 +538,11 @@ export default function DirectorView() {
           <AssetsView
             assets={assets}
             onEdit={(item) => setEditingItem({ type: 'assets', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(id) => {
+              const a = assets.find((x) => x.id === id);
+              setDeletingItem({ id, title: a?.name || '素材' });
+            }}
+            onReveal={handleRevealAsset}
           />
         )}
 
@@ -468,6 +561,8 @@ export default function DirectorView() {
         <EditDialog
           item={editingItem.item}
           type={editingItem.type}
+          scenes={scenes}
+          chapters={chapters}
           onSave={handleSaveEdit}
           onCancel={() => setEditingItem(null)}
         />
@@ -480,11 +575,15 @@ export default function DirectorView() {
 function EditDialog({
   item,
   type,
+  scenes,
+  chapters,
   onSave,
   onCancel,
 }: {
   item: Clue | Conflict | Storyboard | Asset;
   type: Tab;
+  scenes: { id: string; name: string }[];
+  chapters: { id: string; title: string }[];
   onSave: (item: Clue | Conflict | Storyboard | Asset) => void;
   onCancel: () => void;
 }) {
@@ -497,9 +596,9 @@ function EditDialog({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+      <div className="bg-surface-primary rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
         <form onSubmit={handleSubmit}>
-          <div className="px-6 py-4 border-b border-outline sticky top-0 bg-white">
+          <div className="px-6 py-4 border-b border-outline sticky top-0 bg-surface-primary">
             <h3 className="text-lg font-semibold text-on-surface">
               编辑{type === 'clues' ? '伏笔' : type === 'conflicts' ? '冲突' : type === 'storyboards' ? '分镜' : '素材'}
             </h3>
@@ -509,6 +608,7 @@ function EditDialog({
             {type === 'clues' && (
               <ClueForm
                 clue={editedItem as Clue}
+                scenes={scenes}
                 onChange={(updated) => setEditedItem(updated)}
               />
             )}
@@ -521,6 +621,8 @@ function EditDialog({
             {type === 'storyboards' && (
               <StoryboardForm
                 storyboard={editedItem as Storyboard}
+                chapters={chapters}
+                scenes={scenes}
                 onChange={(updated) => setEditedItem(updated)}
               />
             )}
@@ -532,7 +634,7 @@ function EditDialog({
             )}
           </div>
 
-          <div className="px-6 py-4 border-t border-outline flex justify-end gap-3 sticky bottom-0 bg-white">
+          <div className="px-6 py-4 border-t border-outline flex justify-end gap-3 sticky bottom-0 bg-surface-primary">
             <button
               type="button"
               onClick={onCancel}
@@ -553,8 +655,16 @@ function EditDialog({
   );
 }
 
-// 伏笔编辑表单
-function ClueForm({ clue, onChange }: { clue: Clue; onChange: (clue: Clue) => void }) {
+// 伏笔编辑表单（含铺设/回收场景关联）
+function ClueForm({
+  clue,
+  scenes,
+  onChange,
+}: {
+  clue: Clue;
+  scenes: { id: string; name: string }[];
+  onChange: (clue: Clue) => void;
+}) {
   return (
     <>
       <div>
@@ -588,6 +698,34 @@ function ClueForm({ clue, onChange }: { clue: Clue; onChange: (clue: Clue) => vo
           <option value="open">未解决</option>
           <option value="resolved">已解决</option>
         </select>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-medium text-on-surface-variant mb-2">铺设场景（埋下伏笔）</label>
+          <select
+            value={clue.setup_scene_id || ''}
+            onChange={(e) => onChange({ ...clue, setup_scene_id: e.target.value || null })}
+            className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">未关联</option>
+            {scenes.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-on-surface-variant mb-2">回收场景（揭示真相）</label>
+          <select
+            value={clue.payoff_scene_id || ''}
+            onChange={(e) => onChange({ ...clue, payoff_scene_id: e.target.value || null })}
+            className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">未关联</option>
+            {scenes.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
       </div>
       <div>
         <label className="block text-sm font-medium text-on-surface-variant mb-2">描述</label>
@@ -687,8 +825,18 @@ function ConflictForm({ conflict, onChange }: { conflict: Conflict; onChange: (c
   );
 }
 
-// 分镜编辑表单
-function StoryboardForm({ storyboard, onChange }: { storyboard: Storyboard; onChange: (storyboard: Storyboard) => void }) {
+// 分镜编辑表单（含章节/场景关联）
+function StoryboardForm({
+  storyboard,
+  chapters,
+  scenes,
+  onChange,
+}: {
+  storyboard: Storyboard;
+  chapters: { id: string; title: string }[];
+  scenes: { id: string; name: string }[];
+  onChange: (storyboard: Storyboard) => void;
+}) {
   return (
     <>
       <div>
@@ -700,6 +848,34 @@ function StoryboardForm({ storyboard, onChange }: { storyboard: Storyboard; onCh
           className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
           placeholder="输入分镜标题"
         />
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-medium text-on-surface-variant mb-2">关联章节</label>
+          <select
+            value={storyboard.chapter_id || ''}
+            onChange={(e) => onChange({ ...storyboard, chapter_id: e.target.value || null })}
+            className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">未关联</option>
+            {chapters.map((c) => (
+              <option key={c.id} value={c.id}>{c.title}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-on-surface-variant mb-2">关联场景</label>
+          <select
+            value={storyboard.scene_id || ''}
+            onChange={(e) => onChange({ ...storyboard, scene_id: e.target.value || null })}
+            className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">未关联</option>
+            {scenes.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
       </div>
       <div>
         <label className="block text-sm font-medium text-on-surface-variant mb-2">镜头类型</label>
@@ -795,8 +971,18 @@ function AssetForm({ asset, onChange }: { asset: Asset; onChange: (asset: Asset)
   );
 }
 
-// 伏笔视图
-function CluesView({ clues, onEdit, onDelete }: { clues: Clue[]; onEdit: (clue: Clue) => void; onDelete: (id: string) => void }) {
+// 伏笔视图（显示铺设/回收场景关联）
+function CluesView({
+  clues,
+  scenes,
+  onEdit,
+  onDelete,
+}: {
+  clues: Clue[];
+  scenes: { id: string; name: string }[];
+  onEdit: (clue: Clue) => void;
+  onDelete: (id: string) => void;
+}) {
   if (clues.length === 0) {
     return (
       <div className="text-center py-12 text-on-surface-secondary">
@@ -807,28 +993,45 @@ function CluesView({ clues, onEdit, onDelete }: { clues: Clue[]; onEdit: (clue: 
     );
   }
 
+  const sceneName = (id: string | null) => scenes.find((s) => s.id === id)?.name;
+
   return (
     <div className="grid gap-3">
-      {clues.map((clue) => (
-        <div key={clue.id} className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow">
-          <div className="flex items-start justify-between mb-2">
-            <h3 className="font-medium text-on-surface flex-1">{clue.name}</h3>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs px-2 py-1 rounded ${clue.source === 'ai_detected' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
-                {clue.source === 'ai_detected' ? '🤖 AI检测' : '✍️ 手动'}
-              </span>
-              <span className={`text-xs px-2 py-1 rounded ${clue.status === 'resolved' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-                {clue.status === 'open' ? '📂 未解决' : '✅ 已解决'}
-              </span>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                <button onClick={() => onEdit(clue)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
-                <button onClick={() => onDelete(clue.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
+      {clues.map((clue) => {
+        const setup = sceneName(clue.setup_scene_id);
+        const payoff = sceneName(clue.payoff_scene_id);
+        return (
+          <div key={clue.id} className="group p-4 bg-surface-secondary rounded-lg border border-outline hover:shadow-md transition-shadow">
+            <div className="flex items-start justify-between mb-2">
+              <h3 className="font-medium text-on-surface flex-1">{clue.name}</h3>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs px-2 py-1 rounded ${clue.source === 'ai_detected' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'}`}>
+                  {clue.source === 'ai_detected' ? '🤖 AI检测' : '✍️ 手动'}
+                </span>
+                <span className={`text-xs px-2 py-1 rounded ${clue.status === 'resolved' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'}`}>
+                  {clue.status === 'open' ? '📂 未解决' : '✅ 已解决'}
+                </span>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+                  <button onClick={() => onEdit(clue)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
+                  <button onClick={() => onDelete(clue.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
+                </div>
               </div>
             </div>
+            {(setup || payoff) && (
+              <div className="flex items-center gap-2 mb-2 text-xs">
+                <span className="px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
+                  🌱 铺设：{setup || '未关联'}
+                </span>
+                <span className="text-on-surface-secondary">→</span>
+                <span className="px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
+                  💥 回收：{payoff || '未关联'}
+                </span>
+              </div>
+            )}
+            {clue.description && <p className="text-sm text-on-surface-secondary">{clue.description}</p>}
           </div>
-          {clue.description && <p className="text-sm text-on-surface-secondary">{clue.description}</p>}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -892,8 +1095,20 @@ function ConflictsView({ conflicts, onEdit, onDelete }: { conflicts: Conflict[];
   );
 }
 
-// 分镜视图
-function StoryboardsView({ storyboards, onEdit, onDelete }: { storyboards: Storyboard[]; onEdit: (storyboard: Storyboard) => void; onDelete: (id: string) => void }) {
+// 分镜视图（总时长 + 章节关联 + 同级排序）
+function StoryboardsView({
+  storyboards,
+  chapters,
+  onEdit,
+  onDelete,
+  onMove,
+}: {
+  storyboards: Storyboard[];
+  chapters: { id: string; title: string }[];
+  onEdit: (storyboard: Storyboard) => void;
+  onDelete: (id: string) => void;
+  onMove: (board: Storyboard, direction: -1 | 1) => void;
+}) {
   if (storyboards.length === 0) {
     return (
       <div className="text-center py-12 text-on-surface-secondary">
@@ -904,56 +1119,91 @@ function StoryboardsView({ storyboards, onEdit, onDelete }: { storyboards: Story
     );
   }
 
+  const sorted = [...storyboards].sort((a, b) => a.order - b.order);
+  const totalDuration = storyboards.reduce((sum, s) => sum + (s.duration || 0), 0);
+  const chapterTitle = (id: string | null) => chapters.find((c) => c.id === id)?.title;
+
   return (
-    <div className="grid gap-3">
-      {storyboards.map((board) => (
-        <div key={board.id} className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow">
-          <div className="flex items-start justify-between mb-2">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary font-mono">#{board.order + 1}</span>
-                <h3 className="font-medium text-on-surface">{board.title}</h3>
+    <div className="space-y-4">
+      {/* 总时长概览 */}
+      <div className="p-4 bg-surface-secondary rounded-lg border border-outline flex items-center justify-between">
+        <span className="text-sm font-medium text-on-surface">
+          共 {storyboards.length} 个镜头
+        </span>
+        <span className="text-sm font-semibold text-primary-500">
+          总时长 {Math.floor(totalDuration / 60)} 分 {Math.round(totalDuration % 60)} 秒
+        </span>
+      </div>
+
+      <div className="grid gap-3">
+        {sorted.map((board, index) => (
+          <div key={board.id} className="group p-4 bg-surface-secondary rounded-lg border border-outline hover:shadow-md transition-shadow">
+            <div className="flex items-start justify-between mb-2">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary font-mono">#{index + 1}</span>
+                  <h3 className="font-medium text-on-surface">{board.title}</h3>
+                  {board.chapter_id && chapterTitle(board.chapter_id) && (
+                    <span className="text-xs px-2 py-1 rounded bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-300">
+                      📖 {chapterTitle(board.chapter_id)}
+                    </span>
+                  )}
+                </div>
+                {board.description && <p className="text-sm text-on-surface-secondary mb-2">{board.description}</p>}
               </div>
-              {board.description && <p className="text-sm text-on-surface-secondary mb-2">{board.description}</p>}
-            </div>
-            <div className="flex items-start gap-2">
-              <div className="flex flex-col gap-1">
-                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">
-                  {board.shot_type === 'wide' && '🎞️ 远景'}
-                  {board.shot_type === 'medium' && '📷 中景'}
-                  {board.shot_type === 'close' && '🔍 近景'}
-                  {board.shot_type === 'extreme_close' && '🔎 特写'}
-                </span>
-                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">
-                  {board.camera_movement === 'static' && '📍 固定'}
-                  {board.camera_movement === 'pan' && '↔️ 摇镜'}
-                  {board.camera_movement === 'tilt' && '↕️ 倾斜'}
-                  {board.camera_movement === 'zoom' && '🔍 变焦'}
-                  {board.camera_movement === 'dolly' && '🎬 移动'}
-                  {board.camera_movement === 'crane' && '🏗️ 升降'}
-                </span>
-                {board.duration > 0 && <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">⏱️ {board.duration}s</span>}
-              </div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => onEdit(board)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
-                <button onClick={() => onDelete(board.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
+              <div className="flex items-start gap-2">
+                <div className="flex flex-col gap-1">
+                  <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">
+                    {board.shot_type === 'wide' && '🎞️ 远景'}
+                    {board.shot_type === 'medium' && '📷 中景'}
+                    {board.shot_type === 'close' && '🔍 近景'}
+                    {board.shot_type === 'extreme_close' && '🔎 特写'}
+                  </span>
+                  <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">
+                    {board.camera_movement === 'static' && '📍 固定'}
+                    {board.camera_movement === 'pan' && '↔️ 摇镜'}
+                    {board.camera_movement === 'tilt' && '↕️ 倾斜'}
+                    {board.camera_movement === 'zoom' && '🔍 变焦'}
+                    {board.camera_movement === 'dolly' && '🎬 移动'}
+                    {board.camera_movement === 'crane' && '🏗️ 升降'}
+                  </span>
+                  {board.duration > 0 && <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">⏱️ {board.duration}s</span>}
+                </div>
+                <div className="flex flex-col gap-1">
+                  <button onClick={() => onMove(board, -1)} disabled={index === 0} className="p-1.5 text-on-surface-secondary hover:bg-surface-primary rounded transition-colors text-sm disabled:opacity-30" title="上移">↑</button>
+                  <button onClick={() => onMove(board, 1)} disabled={index === sorted.length - 1} className="p-1.5 text-on-surface-secondary hover:bg-surface-primary rounded transition-colors text-sm disabled:opacity-30" title="下移">↓</button>
+                </div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => onEdit(board)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
+                  <button onClick={() => onDelete(board.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
     </div>
   );
 }
 
-// 素材视图
-function AssetsView({ assets, onEdit, onDelete }: { assets: Asset[]; onEdit: (asset: Asset) => void; onDelete: (id: string) => void }) {
+// 素材视图（图片缩略图预览 + 打开所在文件夹）
+function AssetsView({
+  assets,
+  onEdit,
+  onDelete,
+  onReveal,
+}: {
+  assets: Asset[];
+  onEdit: (asset: Asset) => void;
+  onDelete: (id: string) => void;
+  onReveal: (asset: Asset) => void;
+}) {
   if (assets.length === 0) {
     return (
       <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">📦</div>
         <p>暂无素材</p>
-        <p className="text-sm mt-2">点击"新建"添加第一个素材</p>
+        <p className="text-sm mt-2">点击"导入素材"选择本地文件（图片/视频/音频/文档）</p>
       </div>
     );
   }
@@ -961,23 +1211,39 @@ function AssetsView({ assets, onEdit, onDelete }: { assets: Asset[]; onEdit: (as
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
       {assets.map((asset) => (
-        <div key={asset.id} className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow relative">
-          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button onClick={() => onEdit(asset)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
-            <button onClick={() => onDelete(asset.id)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
+        <div key={asset.id} className="group bg-surface-secondary rounded-lg border border-outline hover:shadow-md transition-shadow relative overflow-hidden">
+          <div className="absolute top-2 right-2 z-10 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {asset.type === 'image' && asset.file_path && (
+              <button onClick={() => onReveal(asset)} className="p-1.5 bg-surface-primary text-on-surface-secondary hover:text-on-surface rounded shadow-sm transition-colors text-sm" title="打开所在文件夹">📂</button>
+            )}
+            <button onClick={() => onEdit(asset)} className="p-1.5 bg-surface-primary text-primary-500 hover:bg-surface-tertiary rounded shadow-sm transition-colors text-sm" title="编辑">✏️</button>
+            <button onClick={() => onDelete(asset.id)} className="p-1.5 bg-surface-primary text-red-500 hover:bg-red-50 rounded shadow-sm transition-colors text-sm" title="删除">🗑️</button>
           </div>
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <div className="text-2xl">
-                {asset.type === 'image' && '🖼️'}
+
+          {/* 图片素材：真实缩略图预览 */}
+          {asset.type === 'image' && asset.file_path ? (
+            <div className="aspect-video bg-surface-tertiary overflow-hidden">
+              <img
+                src={convertFileSrc(asset.file_path)}
+                alt={asset.name}
+                className="w-full h-full object-cover"
+                loading="lazy"
+              />
+            </div>
+          ) : (
+            <div className="aspect-video bg-surface-tertiary flex items-center justify-center">
+              <span className="text-4xl opacity-60">
                 {asset.type === 'video' && '🎥'}
                 {asset.type === 'audio' && '🎵'}
                 {asset.type === 'document' && '📄'}
-              </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-on-surface truncate">{asset.name}</h3>
-                <p className="text-xs text-on-surface-secondary">{(asset.file_size / 1024).toFixed(1)} KB</p>
-              </div>
+              </span>
+            </div>
+          )}
+
+          <div className="p-3 flex flex-col gap-2">
+            <div>
+              <h3 className="font-medium text-on-surface truncate">{asset.name}</h3>
+              <p className="text-xs text-on-surface-secondary">{formatFileSize(asset.file_size)}</p>
             </div>
             {asset.tags && asset.tags.length > 0 && (
               <div className="flex flex-wrap gap-1">

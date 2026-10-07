@@ -5,38 +5,21 @@
  * - 管理作品的世界观设定(地点、组织、事件、文化、科技、魔法等)
  * - 提供 CRUD 操作(创建、读取、更新、删除)
  * - 支持分类筛选和搜索功能
- * - 管理设定之间的关联关系
  *
- * 数据结构:
- * - 支持 6 种分类: location, organization, event, culture, technology, magic
- * - 每个设定可关联角色和其他设定
- * - 支持标签系统
- * - 支持自定义图标和颜色
+ * 【实现说明】
+ * - 通过 tauri-plugin-sql 直接访问 SQLite（与其它服务一致）
+ * - world_settings 表在本服务首次访问时自动创建（IF NOT EXISTS 幂等）
+ * - 软删除（deleted 标记），与全局数据约定保持一致
  *
  * @module worldSettingService
  */
 
-import { invoke } from '@tauri-apps/api/core';
-
-/**
- * 生成符合 RFC 4122 v4 标准的 UUID
- *
- * @returns {string} UUID 字符串
- * @example
- * const id = generateUUID(); // "550e8400-e29b-41d4-a716-446655440000"
- */
-function generateUUID(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    const v = c === 'x' ? r : (r & 0x3) | 0x8;
-    return v.toString(16);
-  });
-}
+import { getDatabase, generateUUID, getCurrentTimestamp } from './database';
 
 /**
  * 世界观设定分类
  */
-export type WorldSettingCategory = 
+export type WorldSettingCategory =
   | 'location'      // 地点
   | 'organization'  // 组织
   | 'event'         // 事件
@@ -126,34 +109,82 @@ export const CATEGORY_ICONS: Record<WorldSettingCategory, { icon: string; color:
   }
 };
 
+/** 建表标志（进程内幂等） */
+let tableReady: Promise<void> | null = null;
+
+/**
+ * 确保 world_settings 表存在
+ */
+async function ensureTable(): Promise<void> {
+  if (!tableReady) {
+    tableReady = (async () => {
+      const db = await getDatabase();
+      await db.execute(`
+        CREATE TABLE IF NOT EXISTS world_settings (
+          id TEXT PRIMARY KEY NOT NULL,
+          work_id TEXT NOT NULL,
+          category TEXT NOT NULL CHECK (category IN ('location', 'organization', 'event', 'culture', 'technology', 'magic')),
+          title TEXT NOT NULL,
+          content TEXT NOT NULL DEFAULT '',
+          icon_type TEXT,
+          icon_color TEXT,
+          tags TEXT NOT NULL DEFAULT '[]',
+          related_characters TEXT NOT NULL DEFAULT '[]',
+          related_settings TEXT NOT NULL DEFAULT '[]',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          deleted INTEGER NOT NULL DEFAULT 0,
+          FOREIGN KEY (work_id) REFERENCES works(id) ON DELETE CASCADE
+        )
+      `);
+      await db.execute(`
+        CREATE INDEX IF NOT EXISTS idx_world_settings_work
+        ON world_settings(work_id)
+      `);
+    })();
+  }
+  return tableReady;
+}
+
+/** 数据库行 → WorldSetting（解析 JSON 字段） */
+function rowToSetting(row: any): WorldSetting {
+  const parse = (v: any): string[] => {
+    if (!v) return [];
+    if (Array.isArray(v)) return v;
+    try {
+      const parsed = JSON.parse(v);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  };
+  return {
+    id: row.id,
+    work_id: row.work_id,
+    category: row.category,
+    title: row.title,
+    content: row.content,
+    icon_type: row.icon_type ?? undefined,
+    icon_color: row.icon_color ?? undefined,
+    tags: parse(row.tags),
+    related_characters: parse(row.related_characters),
+    related_settings: parse(row.related_settings),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
 /**
  * 获取作品的所有世界观设定
  */
 export async function getWorldSettings(workId: string): Promise<WorldSetting[]> {
-  try {
-    const result = await invoke<any[]>('execute_query', {
-      query: 'SELECT * FROM world_settings WHERE work_id = $1 ORDER BY created_at DESC',
-      params: [workId]
-    });
-
-    return result.map((row: any) => ({
-      id: row.id,
-      work_id: row.work_id,
-      category: row.category,
-      title: row.title,
-      content: row.content,
-      icon_type: row.icon_type,
-      icon_color: row.icon_color,
-      tags: row.tags ? JSON.parse(row.tags) : [],
-      related_characters: row.related_characters ? JSON.parse(row.related_characters) : [],
-      related_settings: row.related_settings ? JSON.parse(row.related_settings) : [],
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    }));
-  } catch (error) {
-    console.error('Failed to get world settings:', error);
-    throw error;
-  }
+  await ensureTable();
+  const db = await getDatabase();
+  const rows = await db.select<any[]>(
+    'SELECT * FROM world_settings WHERE work_id = $1 AND deleted = 0 ORDER BY created_at DESC',
+    [workId]
+  );
+  return rows.map(rowToSetting);
 }
 
 /**
@@ -163,122 +194,76 @@ export async function getWorldSettingsByCategory(
   workId: string,
   category: WorldSettingCategory
 ): Promise<WorldSetting[]> {
-  try {
-    const result = await invoke<any[]>('execute_query', {
-      query: 'SELECT * FROM world_settings WHERE work_id = $1 AND category = $2 ORDER BY created_at DESC',
-      params: [workId, category]
-    });
-
-    return result.map((row: any) => ({
-      id: row.id,
-      work_id: row.work_id,
-      category: row.category,
-      title: row.title,
-      content: row.content,
-      icon_type: row.icon_type,
-      icon_color: row.icon_color,
-      tags: row.tags ? JSON.parse(row.tags) : [],
-      related_characters: row.related_characters ? JSON.parse(row.related_characters) : [],
-      related_settings: row.related_settings ? JSON.parse(row.related_settings) : [],
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    }));
-  } catch (error) {
-    console.error('Failed to get world settings by category:', error);
-    throw error;
-  }
+  await ensureTable();
+  const db = await getDatabase();
+  const rows = await db.select<any[]>(
+    'SELECT * FROM world_settings WHERE work_id = $1 AND category = $2 AND deleted = 0 ORDER BY created_at DESC',
+    [workId, category]
+  );
+  return rows.map(rowToSetting);
 }
 
 /**
  * 根据 ID 获取世界观设定
  */
 export async function getWorldSettingById(id: string): Promise<WorldSetting | null> {
-  try {
-    const result = await invoke<any[]>('execute_query', {
-      query: 'SELECT * FROM world_settings WHERE id = $1',
-      params: [id]
-    });
-
-    if (result.length === 0) {
-      return null;
-    }
-
-    const row = result[0];
-    return {
-      id: row.id,
-      work_id: row.work_id,
-      category: row.category,
-      title: row.title,
-      content: row.content,
-      icon_type: row.icon_type,
-      icon_color: row.icon_color,
-      tags: row.tags ? JSON.parse(row.tags) : [],
-      related_characters: row.related_characters ? JSON.parse(row.related_characters) : [],
-      related_settings: row.related_settings ? JSON.parse(row.related_settings) : [],
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    };
-  } catch (error) {
-    console.error('Failed to get world setting by id:', error);
-    throw error;
-  }
+  await ensureTable();
+  const db = await getDatabase();
+  const rows = await db.select<any[]>('SELECT * FROM world_settings WHERE id = $1 AND deleted = 0', [id]);
+  return rows.length > 0 ? rowToSetting(rows[0]) : null;
 }
 
 /**
  * 创建世界观设定
  */
 export async function createWorldSetting(input: CreateWorldSettingInput): Promise<WorldSetting> {
+  await ensureTable();
+  const db = await getDatabase();
+
   const id = generateUUID();
-  const now = new Date().toISOString();
-  
-  // 获取默认图标和颜色
+  const now = getCurrentTimestamp();
+
+  // 默认图标与颜色取自分类定义
   const defaultIcon = CATEGORY_ICONS[input.category];
   const iconType = input.icon_type || defaultIcon.icon;
   const iconColor = input.icon_color || defaultIcon.color;
 
-  try {
-    await invoke('execute_query', {
-      query: `
-        INSERT INTO world_settings (
-          id, work_id, category, title, content,
-          icon_type, icon_color, tags, related_characters, related_settings,
-          created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-      `,
-      params: [
-        id,
-        input.work_id,
-        input.category,
-        input.title,
-        input.content,
-        iconType,
-        iconColor,
-        JSON.stringify(input.tags || []),
-        JSON.stringify(input.related_characters || []),
-        JSON.stringify(input.related_settings || []),
-        now,
-        now
-      ]
-    });
-
-    return {
+  await db.execute(
+    `INSERT INTO world_settings (
+      id, work_id, category, title, content,
+      icon_type, icon_color, tags, related_characters, related_settings,
+      created_at, updated_at, deleted
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 0)`,
+    [
       id,
-      work_id: input.work_id,
-      category: input.category,
-      title: input.title,
-      content: input.content,
-      icon_type: iconType,
-      icon_color: iconColor,
-      tags: input.tags || [],
-      related_characters: input.related_characters || [],
-      related_settings: input.related_settings || [],
-      created_at: now,
-      updated_at: now
-    };
-  } catch (error) {
-    console.error('Failed to create world setting:', error);
-    throw error;
-  }
+      input.work_id,
+      input.category,
+      input.title,
+      input.content,
+      iconType,
+      iconColor,
+      JSON.stringify(input.tags || []),
+      JSON.stringify(input.related_characters || []),
+      JSON.stringify(input.related_settings || []),
+      now,
+      now,
+    ]
+  );
+
+  return {
+    id,
+    work_id: input.work_id,
+    category: input.category,
+    title: input.title,
+    content: input.content,
+    icon_type: iconType,
+    icon_color: iconColor,
+    tags: input.tags || [],
+    related_characters: input.related_characters || [],
+    related_settings: input.related_settings || [],
+    created_at: now,
+    updated_at: now,
+  };
 }
 
 /**
@@ -288,78 +273,65 @@ export async function updateWorldSetting(
   id: string,
   input: UpdateWorldSettingInput
 ): Promise<WorldSetting> {
-  const now = new Date().toISOString();
+  await ensureTable();
+  const db = await getDatabase();
+  const now = getCurrentTimestamp();
 
-  try {
-    // 构建动态更新语句
-    const updates: string[] = [];
-    const params: any[] = [];
-    let paramIndex = 1;
+  const updates: string[] = [];
+  const params: any[] = [];
 
-    if (input.title !== undefined) {
-      updates.push(`title = $${paramIndex++}`);
-      params.push(input.title);
-    }
-    if (input.content !== undefined) {
-      updates.push(`content = $${paramIndex++}`);
-      params.push(input.content);
-    }
-    if (input.icon_type !== undefined) {
-      updates.push(`icon_type = $${paramIndex++}`);
-      params.push(input.icon_type);
-    }
-    if (input.icon_color !== undefined) {
-      updates.push(`icon_color = $${paramIndex++}`);
-      params.push(input.icon_color);
-    }
-    if (input.tags !== undefined) {
-      updates.push(`tags = $${paramIndex++}`);
-      params.push(JSON.stringify(input.tags));
-    }
-    if (input.related_characters !== undefined) {
-      updates.push(`related_characters = $${paramIndex++}`);
-      params.push(JSON.stringify(input.related_characters));
-    }
-    if (input.related_settings !== undefined) {
-      updates.push(`related_settings = $${paramIndex++}`);
-      params.push(JSON.stringify(input.related_settings));
-    }
-
-    updates.push(`updated_at = $${paramIndex++}`);
-    params.push(now);
-
-    params.push(id);
-
-    await invoke('execute_query', {
-      query: `UPDATE world_settings SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
-      params
-    });
-
-    const updated = await getWorldSettingById(id);
-    if (!updated) {
-      throw new Error('Failed to get updated world setting');
-    }
-
-    return updated;
-  } catch (error) {
-    console.error('Failed to update world setting:', error);
-    throw error;
+  if (input.title !== undefined) {
+    updates.push('title = ?');
+    params.push(input.title);
   }
+  if (input.content !== undefined) {
+    updates.push('content = ?');
+    params.push(input.content);
+  }
+  if (input.icon_type !== undefined) {
+    updates.push('icon_type = ?');
+    params.push(input.icon_type);
+  }
+  if (input.icon_color !== undefined) {
+    updates.push('icon_color = ?');
+    params.push(input.icon_color);
+  }
+  if (input.tags !== undefined) {
+    updates.push('tags = ?');
+    params.push(JSON.stringify(input.tags));
+  }
+  if (input.related_characters !== undefined) {
+    updates.push('related_characters = ?');
+    params.push(JSON.stringify(input.related_characters));
+  }
+  if (input.related_settings !== undefined) {
+    updates.push('related_settings = ?');
+    params.push(JSON.stringify(input.related_settings));
+  }
+
+  updates.push('updated_at = ?');
+  params.push(now);
+  params.push(id);
+
+  await db.execute(`UPDATE world_settings SET ${updates.join(', ')} WHERE id = ?`, params);
+
+  const updated = await getWorldSettingById(id);
+  if (!updated) {
+    throw new Error('更新世界观设定失败：记录不存在');
+  }
+  return updated;
 }
 
 /**
- * 删除世界观设定
+ * 删除世界观设定（软删除）
  */
 export async function deleteWorldSetting(id: string): Promise<void> {
-  try {
-    await invoke('execute_query', {
-      query: 'DELETE FROM world_settings WHERE id = $1',
-      params: [id]
-    });
-  } catch (error) {
-    console.error('Failed to delete world setting:', error);
-    throw error;
-  }
+  await ensureTable();
+  const db = await getDatabase();
+  await db.execute('UPDATE world_settings SET deleted = 1, updated_at = ? WHERE id = ?', [
+    getCurrentTimestamp(),
+    id,
+  ]);
 }
 
 /**
@@ -369,33 +341,14 @@ export async function searchWorldSettings(
   workId: string,
   searchText: string
 ): Promise<WorldSetting[]> {
-  try {
-    const result = await invoke<any[]>('execute_query', {
-      query: `
-        SELECT * FROM world_settings 
-        WHERE work_id = $1 
-        AND (title LIKE $2 OR content LIKE $2)
-        ORDER BY created_at DESC
-      `,
-      params: [workId, `%${searchText}%`]
-    });
-
-    return result.map((row: any) => ({
-      id: row.id,
-      work_id: row.work_id,
-      category: row.category,
-      title: row.title,
-      content: row.content,
-      icon_type: row.icon_type,
-      icon_color: row.icon_color,
-      tags: row.tags ? JSON.parse(row.tags) : [],
-      related_characters: row.related_characters ? JSON.parse(row.related_characters) : [],
-      related_settings: row.related_settings ? JSON.parse(row.related_settings) : [],
-      created_at: row.created_at,
-      updated_at: row.updated_at
-    }));
-  } catch (error) {
-    console.error('Failed to search world settings:', error);
-    throw error;
-  }
+  await ensureTable();
+  const db = await getDatabase();
+  const rows = await db.select<any[]>(
+    `SELECT * FROM world_settings
+     WHERE work_id = $1 AND deleted = 0
+     AND (title LIKE $2 OR content LIKE $2)
+     ORDER BY created_at DESC`,
+    [workId, `%${searchText}%`]
+  );
+  return rows.map(rowToSetting);
 }

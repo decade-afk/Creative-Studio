@@ -49,13 +49,15 @@
  * 4. useCallback 用于事件处理函数，优化性能
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { OutlineNode, Scene, Milestone, Character } from '../types/storage';
 import { getOutlineNodesByWorkId, createOutlineNode, updateOutlineNode, deleteOutlineNode } from '../services/outlineService';
 import { getScenesByWorkId, createScene, updateScene, deleteScene } from '../services/sceneService';
 import { getMilestonesByWorkId, createMilestone, updateMilestone, deleteMilestone } from '../services/milestoneService';
 import { getWorks } from '../services/workService';
 import { getCharactersByWorkId, createCharacter, updateCharacter, deleteCharacter } from '../services/characterService';
+import { useWriterStore } from '../stores/writerStore';
+import type { Work } from '../types/storage';
 import { 
   getWorldSettings, 
   createWorldSetting, 
@@ -77,6 +79,7 @@ type EditingItem = {
 
 export default function PlannerView() {
   const [currentWorkId, setCurrentWorkId] = useState<string>('');
+  const [works, setWorks] = useState<Work[]>([]);
   const [currentTab, setCurrentTab] = useState<Tab>('outline');
   const [loading, setLoading] = useState(false);
 
@@ -87,21 +90,32 @@ export default function PlannerView() {
   const [milestones, setMilestones] = useState<Milestone[]>([]);
   const [worldSettings, setWorldSettings] = useState<WorldSetting[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<WorldSettingCategory | null>(null);
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
 
   // UI 状态
   const [editingItem, setEditingItem] = useState<EditingItem>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingItem, setDeletingItem] = useState<{ id: string; title: string; childCount: number } | null>(null);
   const { showToast, ToastComponent } = useToast();
 
-  // 加载作品
+  // 与全局当前作品保持一致（创作视图切换作品后这里自动跟随）
   useEffect(() => {
     async function loadWork() {
-      const works = await getWorks();
-      if (works.length > 0) {
-        setCurrentWorkId(works[0].id);
+      const loadedWorks = await getWorks();
+      setWorks(loadedWorks);
+      const storeId = useWriterStore.getState().currentWorkId;
+      if (storeId && loadedWorks.some((w) => w.id === storeId)) {
+        setCurrentWorkId(storeId);
+      } else if (loadedWorks.length > 0) {
+        setCurrentWorkId(loadedWorks[0].id);
       }
     }
     loadWork();
+  }, []);
+
+  /** 切换作品：更新本视图并同步全局 store，创作/导演视图随之跟随 */
+  const handleWorkChange = useCallback(async (workId: string) => {
+    setCurrentWorkId(workId);
+    useWriterStore.getState().setCurrentWorkId(workId);
   }, []);
 
   // 加载数据
@@ -167,6 +181,9 @@ export default function PlannerView() {
     }
   }, [currentWorkId, currentTab, showToast]);
 
+  // 构建大纲树（孤儿节点提升为顶层），供快速创建与树形操作使用
+  const outlineTree = useMemo(() => buildOutlineTree(outlineNodes), [outlineNodes]);
+
   // 快速创建项
   const handleQuickCreate = useCallback(async () => {
     if (!currentWorkId || loading) return;
@@ -175,13 +192,13 @@ export default function PlannerView() {
     try {
       switch (currentTab) {
         case 'outline':
-          // 使用 outlineNodes 获取长度，避免在依赖数组中使用 .length
+          // 根节点：幕（Act）
           await createOutlineNode({
             work_id: currentWorkId,
             parent_id: null,
-            title: '新大纲节点',
+            title: '新幕',
             description: '',
-            order: outlineNodes.length, // 直接使用，因为 outlineNodes 在依赖中
+            order: outlineTree.length,
             type: 'act',
           });
           showToast('大纲节点创建成功', 'success');
@@ -236,7 +253,7 @@ export default function PlannerView() {
     } finally {
       setLoading(false);
     }
-  }, [currentWorkId, currentTab, loading, outlineNodes, selectedCategory, reloadCurrentTab, showToast]);
+  }, [currentWorkId, currentTab, loading, outlineTree, selectedCategory, reloadCurrentTab, showToast]);
 
   // 保存编辑
   const handleSaveEdit = useCallback(async (item: OutlineNode | Character | Scene | Milestone | WorldSetting) => {
@@ -316,34 +333,35 @@ export default function PlannerView() {
 
   // 确认删除
   const handleConfirmDelete = useCallback(async () => {
-    if (!deletingId) return;
+    if (!deletingItem) return;
 
     setLoading(true);
     try {
       switch (currentTab) {
         case 'outline':
-          await deleteOutlineNode(deletingId);
-          showToast('大纲节点已删除', 'success');
+          // 大纲节点级联软删除（先收集全部后代，再逐个删除）
+          await deleteOutlineNodeCascade(deletingItem.id, outlineNodes);
+          showToast(`大纲节点已删除（含 ${deletingItem.childCount} 个子节点）`, 'success');
           break;
         case 'characters':
-          await deleteCharacter(deletingId);
+          await deleteCharacter(deletingItem.id);
           showToast('角色已删除', 'success');
           break;
         case 'scenes':
-          await deleteScene(deletingId);
+          await deleteScene(deletingItem.id);
           showToast('场景已删除', 'success');
           break;
         case 'milestones':
-          await deleteMilestone(deletingId);
+          await deleteMilestone(deletingItem.id);
           showToast('里程碑已删除', 'success');
           break;
         case 'worldSettings':
-          await deleteWorldSetting(deletingId);
+          await deleteWorldSetting(deletingItem.id);
           showToast('世界观设定已删除', 'success');
           break;
       }
 
-      setDeletingId(null);
+      setDeletingItem(null);
       await reloadCurrentTab();
     } catch (error) {
       showToast('删除失败', 'error');
@@ -351,22 +369,100 @@ export default function PlannerView() {
     } finally {
       setLoading(false);
     }
-  }, [deletingId, currentTab, reloadCurrentTab, showToast]);
+  }, [deletingItem, currentTab, outlineNodes, reloadCurrentTab, showToast]);
+
+  // ==========================================================================
+  // 大纲树操作
+  // ==========================================================================
+
+  /** 在指定节点下新建子节点（类型自动下探：幕→场景→事件） */
+  const handleAddChild = useCallback(async (parent: OutlineNode) => {
+    if (!currentWorkId) return;
+    const childType = parent.type === 'act' ? 'scene' : 'event';
+    const childCount = countDescendants(parent.id, outlineTree);
+    try {
+      await createOutlineNode({
+        work_id: currentWorkId,
+        parent_id: parent.id,
+        title: childType === 'scene' ? '新场景节点' : '新事件节点',
+        description: '',
+        order: childCount,
+        type: childType,
+      });
+      // 确保父节点处于展开状态
+      setCollapsedIds((prev) => {
+        if (!prev.has(parent.id)) return prev;
+        const next = new Set(prev);
+        next.delete(parent.id);
+        return next;
+      });
+      showToast('子节点创建成功', 'success');
+      await reloadCurrentTab();
+    } catch (error) {
+      showToast('创建失败', 'error');
+      console.error(error);
+    }
+  }, [currentWorkId, outlineTree, reloadCurrentTab, showToast]);
+
+  /** 同级排序：与相邻节点交换 order 值 */
+  const handleMoveNode = useCallback(async (node: OutlineNode, direction: -1 | 1) => {
+    const siblings = findSiblings(node, outlineTree);
+    const index = siblings.findIndex((s) => s.id === node.id);
+    const target = siblings[index + direction];
+    if (!target) return;
+    try {
+      await updateOutlineNode(node.id, { order: target.order });
+      await updateOutlineNode(target.id, { order: node.order });
+      await reloadCurrentTab();
+    } catch (error) {
+      showToast('排序失败', 'error');
+      console.error(error);
+    }
+  }, [outlineTree, reloadCurrentTab, showToast]);
+
+  /** 里程碑状态快捷切换（点击徽章循环：待办 → 进行中 → 已完成） */
+  const handleCycleMilestoneStatus = useCallback(async (milestone: Milestone) => {
+    const nextStatus =
+      milestone.status === 'pending' ? 'in_progress' : milestone.status === 'in_progress' ? 'completed' : 'pending';
+    try {
+      await updateMilestone(milestone.id, { status: nextStatus });
+      setMilestones(
+        milestones.map((m) => (m.id === milestone.id ? { ...m, status: nextStatus } : m))
+      );
+    } catch (error) {
+      showToast('状态更新失败', 'error');
+      console.error(error);
+    }
+  }, [milestones, showToast]);
+
+  // 展开/收起节点
+  const toggleCollapse = useCallback((id: string) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   return (
     <div className="flex-1 flex flex-col bg-surface-primary overflow-hidden">
       {ToastComponent}
 
       {/* 确认删除对话框 */}
-      {deletingId && (
+      {deletingItem && (
         <ConfirmDialog
           title="确认删除"
-          message="确定要删除这个项目吗？此操作无法撤销。"
+          message={
+            currentTab === 'outline' && deletingItem.childCount > 0
+              ? `确定要删除「${deletingItem.title}」吗？其下的 ${deletingItem.childCount} 个子节点也将一并删除，此操作无法撤销。`
+              : `确定要删除「${deletingItem.title}」吗？此操作无法撤销。`
+          }
           confirmText="删除"
           cancelText="取消"
           type="danger"
           onConfirm={handleConfirmDelete}
-          onCancel={() => setDeletingId(null)}
+          onCancel={() => setDeletingItem(null)}
         />
       )}
 
@@ -378,17 +474,29 @@ export default function PlannerView() {
           backgroundColor: 'var(--surface-secondary)',
         }}
       >
-        <div className="flex gap-2">
-          <button
-            onClick={() => setCurrentTab('outline')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-              currentTab === 'outline'
-                ? 'bg-primary-500 text-white'
-                : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
-            }`}
+        <div className="flex items-center gap-3">
+          <select
+            value={currentWorkId}
+            onChange={(e) => handleWorkChange(e.target.value)}
+            className="px-3 py-2 rounded-lg text-sm font-medium bg-surface-primary text-on-surface border border-outline focus:outline-none focus:ring-2 focus:ring-primary-500 max-w-[180px]"
+            title="切换作品"
           >
-            📋 大纲
-          </button>
+            {works.length === 0 && <option value="">暂无作品</option>}
+            {works.map((w) => (
+              <option key={w.id} value={w.id}>{w.icon} {w.title}</option>
+            ))}
+          </select>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setCurrentTab('outline')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                currentTab === 'outline'
+                  ? 'bg-primary-500 text-white'
+                  : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
+              }`}
+            >
+              📋 大纲
+            </button>
           <button
             onClick={() => setCurrentTab('characters')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
@@ -429,6 +537,7 @@ export default function PlannerView() {
           >
             🌍 世界观
           </button>
+          </div>
         </div>
 
         <button
@@ -449,10 +558,18 @@ export default function PlannerView() {
         )}
 
         {!loading && currentTab === 'outline' && (
-          <OutlineView
-            nodes={outlineNodes}
+          <OutlineTreeView
+            tree={outlineTree}
+            collapsedIds={collapsedIds}
+            onToggleCollapse={toggleCollapse}
             onEdit={(item) => setEditingItem({ type: 'outline', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(node) => setDeletingItem({
+              id: node.id,
+              title: node.title,
+              childCount: countDescendants(node.id, outlineTree),
+            })}
+            onAddChild={handleAddChild}
+            onMove={handleMoveNode}
           />
         )}
 
@@ -460,7 +577,10 @@ export default function PlannerView() {
           <CharactersView
             characters={characters}
             onEdit={(item) => setEditingItem({ type: 'characters', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(id) => {
+              const c = characters.find((x) => x.id === id);
+              setDeletingItem({ id, title: c?.name || '角色', childCount: 0 });
+            }}
           />
         )}
 
@@ -468,7 +588,10 @@ export default function PlannerView() {
           <ScenesView
             scenes={scenes}
             onEdit={(item) => setEditingItem({ type: 'scenes', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(id) => {
+              const s = scenes.find((x) => x.id === id);
+              setDeletingItem({ id, title: s?.name || '场景', childCount: 0 });
+            }}
           />
         )}
 
@@ -476,7 +599,11 @@ export default function PlannerView() {
           <MilestonesView
             milestones={milestones}
             onEdit={(item) => setEditingItem({ type: 'milestones', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(id) => {
+              const m = milestones.find((x) => x.id === id);
+              setDeletingItem({ id, title: m?.title || '里程碑', childCount: 0 });
+            }}
+            onCycleStatus={handleCycleMilestoneStatus}
           />
         )}
 
@@ -486,7 +613,10 @@ export default function PlannerView() {
             selectedCategory={selectedCategory}
             onCategoryChange={setSelectedCategory}
             onEdit={(item) => setEditingItem({ type: 'worldSettings', item })}
-            onDelete={(id) => setDeletingId(id)}
+            onDelete={(id) => {
+              const w = worldSettings.find((x) => x.id === id);
+              setDeletingItem({ id, title: w?.title || '世界观设定', childCount: 0 });
+            }}
           />
         )}
 
@@ -545,10 +675,10 @@ function EditDialog({
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
-      <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+      <div className="bg-surface-secondary rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
         <form onSubmit={handleSubmit}>
           {/* 标题 */}
-          <div className="px-6 py-4 border-b border-outline sticky top-0 bg-white">
+          <div className="px-6 py-4 border-b border-outline sticky top-0 bg-surface-primary">
             <h3 className="text-lg font-semibold text-on-surface">
               编辑{getDialogTitle()}
             </h3>
@@ -589,7 +719,7 @@ function EditDialog({
           </div>
 
           {/* 按钮 */}
-          <div className="px-6 py-4 border-t border-outline flex justify-end gap-3 sticky bottom-0 bg-white">
+          <div className="px-6 py-4 border-t border-outline flex justify-end gap-3 sticky bottom-0 bg-surface-primary">
             <button
               type="button"
               onClick={onCancel}
@@ -837,68 +967,181 @@ function MilestoneForm({
   );
 }
 
-// 大纲视图（添加编辑/删除按钮）
-function OutlineView({
-  nodes,
+// 大纲树形视图（支持层级、展开收起、子节点、同级排序）
+interface OutlineTreeNode {
+  node: OutlineNode;
+  children: OutlineTreeNode[];
+}
+
+/** 由扁平节点构建大纲树；父节点缺失的孤儿提升为顶层 */
+function buildOutlineTree(nodes: OutlineNode[]): OutlineTreeNode[] {
+  const map = new Map<string, OutlineTreeNode>();
+  for (const n of nodes) map.set(n.id, { node: n, children: [] });
+
+  const roots: OutlineTreeNode[] = [];
+  for (const tn of map.values()) {
+    const parent = tn.node.parent_id ? map.get(tn.node.parent_id) : undefined;
+    if (parent) parent.children.push(tn);
+    else roots.push(tn);
+  }
+
+  const sortRec = (list: OutlineTreeNode[]) => {
+    list.sort((a, b) => a.node.order - b.node.order);
+    list.forEach((t) => sortRec(t.children));
+  };
+  sortRec(roots);
+  return roots;
+}
+
+/** 统计指定节点在树中的后代数量 */
+function countDescendants(id: string, tree: OutlineTreeNode[]): number {
+  const find = (list: OutlineTreeNode[]): OutlineTreeNode | null => {
+    for (const t of list) {
+      if (t.node.id === id) return t;
+      const found = find(t.children);
+      if (found) return found;
+    }
+    return null;
+  };
+  const target = find(tree);
+  if (!target) return 0;
+  let count = 0;
+  const walk = (list: OutlineTreeNode[]) => {
+    for (const t of list) {
+      count++;
+      walk(t.children);
+    }
+  };
+  walk(target.children);
+  return count;
+}
+
+/** 在树中查找节点所在同级列表 */
+function findSiblings(node: OutlineNode, tree: OutlineTreeNode[]): OutlineNode[] {
+  const find = (list: OutlineTreeNode[]): OutlineNode[] | null => {
+    for (const t of list) {
+      if (t.node.id === node.id) return list.map((x) => x.node);
+      const found = find(t.children);
+      if (found) return found;
+    }
+    return null;
+  };
+  return find(tree) || [];
+}
+
+/** 级联软删除节点及其全部后代 */
+async function deleteOutlineNodeCascade(id: string, nodes: OutlineNode[]): Promise<void> {
+  const tree = buildOutlineTree(nodes);
+  const ids: string[] = [];
+  const find = (list: OutlineTreeNode[]): OutlineTreeNode | null => {
+    for (const t of list) {
+      if (t.node.id === id) return t;
+      const found = find(t.children);
+      if (found) return found;
+    }
+    return null;
+  };
+  const target = find(tree);
+  if (target) {
+    const walk = (t: OutlineTreeNode) => {
+      ids.push(t.node.id);
+      t.children.forEach(walk);
+    };
+    walk(target);
+  } else {
+    ids.push(id);
+  }
+  for (const nodeId of ids) {
+    await deleteOutlineNode(nodeId);
+  }
+}
+
+function OutlineTreeView({
+  tree,
+  collapsedIds,
+  onToggleCollapse,
   onEdit,
   onDelete,
+  onAddChild,
+  onMove,
 }: {
-  nodes: OutlineNode[];
+  tree: OutlineTreeNode[];
+  collapsedIds: Set<string>;
+  onToggleCollapse: (id: string) => void;
   onEdit: (node: OutlineNode) => void;
-  onDelete: (id: string) => void;
+  onDelete: (node: OutlineNode) => void;
+  onAddChild: (node: OutlineNode) => void;
+  onMove: (node: OutlineNode, direction: -1 | 1) => void;
 }) {
-  if (nodes.length === 0) {
+  if (tree.length === 0) {
     return (
       <div className="text-center py-12 text-on-surface-secondary">
         <div className="text-4xl mb-4">📋</div>
         <p>暂无大纲节点</p>
-        <p className="text-sm mt-2">点击"新建"创建第一个大纲节点</p>
+        <p className="text-sm mt-2">点击"新建"创建第一幕，或在大纲下逐层搭建故事结构</p>
       </div>
     );
   }
 
-  return (
-    <div className="grid gap-3">
-      {nodes.map((node) => (
-        <div
-          key={node.id}
-          className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow"
-        >
-          <div className="flex items-start justify-between">
-            <div className="flex-1">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
-                  {node.type === 'act' && '幕'}
-                  {node.type === 'scene' && '场景'}
-                  {node.type === 'event' && '事件'}
+  const renderNodes = (list: OutlineTreeNode[], depth: number) =>
+    list.map(({ node, children }) => {
+      const collapsed = collapsedIds.has(node.id);
+      const typeStyle =
+        node.type === 'act'
+          ? 'bg-primary-100 text-primary-700 dark:bg-primary-900 dark:text-primary-300'
+          : node.type === 'scene'
+          ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+          : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300';
+
+      return (
+        <div key={node.id}>
+          <div
+            className="group flex items-start gap-2 p-3 bg-surface-secondary rounded-lg border border-outline hover:shadow-md transition-shadow"
+            style={{ marginLeft: depth * 24 }}
+          >
+            {/* 展开/收起 */}
+            <button
+              onClick={() => onToggleCollapse(node.id)}
+              disabled={children.length === 0}
+              className={`w-6 h-6 flex items-center justify-center rounded text-on-surface-secondary shrink-0 mt-0.5 ${
+                children.length > 0 ? 'hover:bg-surface-tertiary' : 'opacity-0 cursor-default'
+              }`}
+              title={collapsed ? '展开' : '收起'}
+            >
+              {collapsed ? '▶' : '▼'}
+            </button>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className={`text-xs px-2 py-0.5 rounded ${typeStyle}`}>
+                  {node.type === 'act' ? '幕' : node.type === 'scene' ? '场景' : '事件'}
                 </span>
+                {children.length > 0 && (
+                  <span className="text-xs text-on-surface-secondary">{children.length} 个子节点</span>
+                )}
                 <h3 className="font-medium text-on-surface">{node.title}</h3>
               </div>
               {node.description && (
-                <p className="text-sm text-on-surface-secondary">{node.description}</p>
+                <p className="text-sm text-on-surface-secondary mt-1">{node.description}</p>
               )}
             </div>
-            <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-              <button
-                onClick={() => onEdit(node)}
-                className="p-2 text-primary-500 hover:bg-surface-primary rounded transition-colors"
-                title="编辑"
-              >
-                ✏️
-              </button>
-              <button
-                onClick={() => onDelete(node.id)}
-                className="p-2 text-red-500 hover:bg-red-50 rounded transition-colors"
-                title="删除"
-              >
-                🗑️
-              </button>
+
+            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+              <button onClick={() => onAddChild(node)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="添加子节点">➕</button>
+              <button onClick={() => onMove(node, -1)} className="p-1.5 text-on-surface-secondary hover:bg-surface-primary rounded transition-colors text-sm" title="上移">↑</button>
+              <button onClick={() => onMove(node, 1)} className="p-1.5 text-on-surface-secondary hover:bg-surface-primary rounded transition-colors text-sm" title="下移">↓</button>
+              <button onClick={() => onEdit(node)} className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm" title="编辑">✏️</button>
+              <button onClick={() => onDelete(node)} className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm" title="删除">🗑️</button>
             </div>
           </div>
+          {!collapsed && children.length > 0 && (
+            <div className="mt-2 space-y-2">{renderNodes(children, depth + 1)}</div>
+          )}
         </div>
-      ))}
-    </div>
-  );
+      );
+    });
+
+  return <div className="space-y-2">{renderNodes(tree, 0)}</div>;
 }
 
 // 角色视图（添加编辑/删除按钮）
@@ -926,7 +1169,7 @@ function CharactersView({
       {characters.map((char) => (
         <div
           key={char.id}
-          className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow relative"
+          className="group p-4 bg-surface-secondary rounded-lg border border-outline hover:shadow-md transition-shadow relative"
         >
           <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
@@ -953,7 +1196,17 @@ function CharactersView({
             </div>
           </div>
           {char.description && (
-            <p className="text-sm text-on-surface-secondary line-clamp-3">{char.description}</p>
+            <p className="text-sm text-on-surface-secondary line-clamp-3 mb-2">{char.description}</p>
+          )}
+          {char.personality && (
+            <p className="text-xs text-on-surface-secondary line-clamp-2">
+              <span className="font-medium text-on-surface">性格：</span>{char.personality}
+            </p>
+          )}
+          {char.relationships && (
+            <p className="text-xs text-on-surface-secondary line-clamp-2 mt-1">
+              <span className="font-medium text-on-surface">关系：</span>{char.relationships}
+            </p>
           )}
         </div>
       ))}
@@ -986,7 +1239,7 @@ function ScenesView({
       {scenes.map((scene) => (
         <div
           key={scene.id}
-          className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow"
+          className="group p-4 bg-surface-secondary rounded-lg border border-outline hover:shadow-md transition-shadow"
         >
           <div className="flex items-start justify-between mb-2">
             <h3 className="font-medium text-on-surface flex-1">{scene.name}</h3>
@@ -1030,15 +1283,17 @@ function ScenesView({
   );
 }
 
-// 里程碑视图（添加编辑/删除按钮）
+// 里程碑视图（进度总览 + 状态快捷切换）
 function MilestonesView({
   milestones,
   onEdit,
   onDelete,
+  onCycleStatus,
 }: {
   milestones: Milestone[];
   onEdit: (milestone: Milestone) => void;
   onDelete: (id: string) => void;
+  onCycleStatus: (milestone: Milestone) => void;
 }) {
   if (milestones.length === 0) {
     return (
@@ -1050,57 +1305,98 @@ function MilestonesView({
     );
   }
 
+  const completed = milestones.filter((m) => m.status === 'completed').length;
+  const percent = Math.round((completed / milestones.length) * 100);
+  const now = Date.now();
+
   return (
-    <div className="grid gap-3">
-      {milestones.map((milestone) => (
-        <div
-          key={milestone.id}
-          className="group p-4 bg-white rounded-lg border border-outline hover:shadow-md transition-shadow"
-        >
-          <div className="flex items-start justify-between mb-2">
-            <h3 className="font-medium text-on-surface flex-1">{milestone.title}</h3>
-            <div className="flex items-center gap-2">
-              <span
-                className={`text-xs px-2 py-1 rounded ${
-                  milestone.status === 'completed'
-                    ? 'bg-green-100 text-green-700'
-                    : milestone.status === 'in_progress'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'bg-gray-100 text-gray-700'
-                }`}
-              >
-                {milestone.status === 'pending' && '📋 待办'}
-                {milestone.status === 'in_progress' && '🚀 进行中'}
-                {milestone.status === 'completed' && '✅ 已完成'}
-              </span>
-              {milestone.due_date && (
-                <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary">
-                  📅 {new Date(milestone.due_date).toLocaleDateString()}
-                </span>
-              )}
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
-                <button
-                  onClick={() => onEdit(milestone)}
-                  className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm"
-                  title="编辑"
-                >
-                  ✏️
-                </button>
-                <button
-                  onClick={() => onDelete(milestone.id)}
-                  className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm"
-                  title="删除"
-                >
-                  🗑️
-                </button>
-              </div>
-            </div>
-          </div>
-          {milestone.description && (
-            <p className="text-sm text-on-surface-secondary">{milestone.description}</p>
-          )}
+    <div className="space-y-4">
+      {/* 进度总览 */}
+      <div className="p-4 bg-surface-secondary rounded-lg border border-outline">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-sm font-medium text-on-surface">
+            创作进度：{completed} / {milestones.length} 已完成
+          </span>
+          <span className="text-sm font-semibold text-primary-500">{percent}%</span>
         </div>
-      ))}
+        <div className="h-2 bg-surface-tertiary rounded-full overflow-hidden">
+          <div
+            className="h-full bg-gradient-to-r from-[#a07d5e] to-[#8b6342] rounded-full transition-all"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      </div>
+
+      <div className="grid gap-3">
+        {milestones.map((milestone) => {
+          const overdue =
+            milestone.status !== 'completed' &&
+            milestone.due_date &&
+            new Date(milestone.due_date).getTime() < now;
+          return (
+            <div
+              key={milestone.id}
+              className={`group p-4 rounded-lg border transition-shadow hover:shadow-md ${
+                overdue
+                  ? 'bg-red-50 border-red-200 dark:bg-red-950 dark:border-red-900'
+                  : 'bg-surface-secondary border-outline'
+              }`}
+            >
+              <div className="flex items-start justify-between mb-2">
+                <h3 className={`font-medium flex-1 ${milestone.status === 'completed' ? 'text-on-surface-secondary line-through' : 'text-on-surface'}`}>
+                  {milestone.title}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {/* 点击徽章循环切换状态 */}
+                  <button
+                    onClick={() => onCycleStatus(milestone)}
+                    className={`text-xs px-2 py-1 rounded cursor-pointer hover:opacity-80 transition-opacity ${
+                      milestone.status === 'completed'
+                        ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                        : milestone.status === 'in_progress'
+                        ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+                        : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                    }`}
+                    title="点击切换状态"
+                  >
+                    {milestone.status === 'pending' && '📋 待办'}
+                    {milestone.status === 'in_progress' && '🚀 进行中'}
+                    {milestone.status === 'completed' && '✅ 已完成'}
+                  </button>
+                  {milestone.due_date && (
+                    <span className={`text-xs px-2 py-1 rounded ${
+                      overdue
+                        ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                        : 'bg-surface-primary text-on-surface-secondary'
+                    }`}>
+                      📅 {new Date(milestone.due_date).toLocaleDateString()}{overdue ? '（已逾期）' : ''}
+                    </span>
+                  )}
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+                    <button
+                      onClick={() => onEdit(milestone)}
+                      className="p-1.5 text-primary-500 hover:bg-surface-primary rounded transition-colors text-sm"
+                      title="编辑"
+                    >
+                      ✏️
+                    </button>
+                    <button
+                      onClick={() => onDelete(milestone.id)}
+                      className="p-1.5 text-red-500 hover:bg-red-50 rounded transition-colors text-sm"
+                      title="删除"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                </div>
+              </div>
+              {milestone.description && (
+                <p className="text-sm text-on-surface-secondary">{milestone.description}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1135,7 +1431,7 @@ function WorldSettingsView({
           className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
             selectedCategory === null
               ? 'bg-primary-500 text-white'
-              : 'bg-white text-on-surface-variant border border-outline hover:bg-surface-primary'
+              : 'bg-surface-secondary text-on-surface-variant border border-outline hover:bg-surface-primary'
           }`}
         >
           全部
@@ -1149,7 +1445,7 @@ function WorldSettingsView({
               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
                 selectedCategory === cat
                   ? 'bg-primary-500 text-white'
-                  : 'bg-white text-on-surface-variant border border-outline hover:bg-surface-primary'
+                  : 'bg-surface-secondary text-on-surface-variant border border-outline hover:bg-surface-primary'
               }`}
             >
               {info.icon} {info.label}
@@ -1172,7 +1468,7 @@ function WorldSettingsView({
             return (
               <div
                 key={setting.id}
-                className="group p-5 bg-white rounded-xl border border-outline hover:shadow-lg transition-all relative overflow-hidden"
+                className="group p-5 bg-surface-secondary rounded-xl border border-outline hover:shadow-lg transition-all relative overflow-hidden"
               >
                 {/* 背景装饰 */}
                 <div 
@@ -1191,14 +1487,14 @@ function WorldSettingsView({
                 <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => onEdit(setting)}
-                    className="p-1.5 bg-white text-primary-500 hover:bg-surface-primary rounded shadow-sm transition-colors text-sm"
+                    className="p-1.5 bg-surface-primary text-primary-500 hover:bg-surface-primary rounded shadow-sm transition-colors text-sm"
                     title="编辑"
                   >
                     ✏️
                   </button>
                   <button
                     onClick={() => onDelete(setting.id)}
-                    className="p-1.5 bg-white text-red-500 hover:bg-red-50 rounded shadow-sm transition-colors text-sm"
+                    className="p-1.5 bg-surface-primary text-red-500 hover:bg-red-50 rounded shadow-sm transition-colors text-sm"
                     title="删除"
                   >
                     🗑️

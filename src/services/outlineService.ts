@@ -15,7 +15,7 @@ export async function getOutlineNodesByWorkId(workId: string): Promise<OutlineNo
   const nodes = await db.select<OutlineNode[]>(
     `SELECT * FROM outline_nodes
      WHERE work_id = ? AND deleted = 0
-     ORDER BY order ASC`,
+     ORDER BY "order" ASC`,
     [workId]
   );
 
@@ -31,7 +31,7 @@ export async function getChildNodes(workId: string, parentId: string | null): Pr
   const nodes = await db.select<OutlineNode[]>(
     `SELECT * FROM outline_nodes
      WHERE work_id = ? AND parent_id ${parentId === null ? 'IS NULL' : '= ?'} AND deleted = 0
-     ORDER BY order ASC`,
+     ORDER BY "order" ASC`,
     parentId === null ? [workId] : [workId, parentId]
   );
 
