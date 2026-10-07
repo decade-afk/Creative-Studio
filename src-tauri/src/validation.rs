@@ -52,14 +52,14 @@ pub fn validate_model_path(path: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::ModelPathEmpty);
     }
 
+    // 检查文件格式（先于存在性检查，便于给出明确的格式错误提示）
+    if !path.to_lowercase().ends_with(".gguf") {
+        return Err(ValidationError::InvalidModelFormat(path.to_string()));
+    }
+
     // 检查文件是否存在
     if !Path::new(path).exists() {
         return Err(ValidationError::ModelFileNotFound(path.to_string()));
-    }
-
-    // 检查文件格式
-    if !path.to_lowercase().ends_with(".gguf") {
-        return Err(ValidationError::InvalidModelFormat(path.to_string()));
     }
 
     // 检查路径是否包含非法字符（防止路径遍历攻击）
@@ -136,6 +136,9 @@ pub fn validate_generate_request(
 }
 
 /// 验证文件路径（用于导出功能）
+///
+/// 【说明】保存对话框返回的是用户选择的绝对路径（Windows 下带盘符如 `C:\`），
+/// 因此允许开头的盘符冒号，仅对其余部分做非法字符检查。
 pub fn validate_file_path(path: &str) -> Result<(), ValidationError> {
     let path_str = path.trim();
 
@@ -144,15 +147,25 @@ pub fn validate_file_path(path: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::InvalidFilePath("路径不能为空".to_string()));
     }
 
-    // 检查路径是否包含非法字符
-    if path_str.contains("..") || path_str.contains("~") {
+    // Windows 盘符前缀（如 C:\ 或 C:/）：跳过前两个字符后再检查冒号
+    let check_str = if path_str.len() >= 2
+        && path_str.as_bytes()[0].is_ascii_alphabetic()
+        && path_str.as_bytes()[1] == b':'
+    {
+        &path_str[2..]
+    } else {
+        path_str
+    };
+
+    // 防路径遍历
+    if check_str.contains("..") {
         return Err(ValidationError::PathContainsInvalidChars(path_str.to_string()));
     }
 
-    // 检查路径是否包含非法字符（Windows 和 Unix）
+    // 检查非法字符（Windows 和 Unix）
     let invalid_chars = ['\0', '<', '>', ':', '"', '|', '?', '*'];
     for &c in &invalid_chars {
-        if path_str.contains(c) {
+        if check_str.contains(c) {
             return Err(ValidationError::InvalidFilePath(format!(
                 "路径包含非法字符: '{}'",
                 c
@@ -242,5 +255,14 @@ mod tests {
             validate_file_path("../test.txt"),
             Err(ValidationError::PathContainsInvalidChars(_))
         ));
+    }
+
+    #[test]
+    fn test_validate_file_path_windows_drive() {
+        // Windows 盘符路径必须合法
+        assert!(validate_file_path("C:\\Users\\test\\out.docx").is_ok());
+        assert!(validate_file_path("D:/导出/作品.epub").is_ok());
+        // 盘符之后出现冒号仍然非法
+        assert!(validate_file_path("C:\\bad:name.txt").is_err());
     }
 }

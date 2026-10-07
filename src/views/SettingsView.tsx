@@ -11,8 +11,9 @@
  * 7. 关于信息 - 显示应用版本和相关信息
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { ask, message } from '@tauri-apps/plugin-dialog';
 import { useToast } from '../components/Toast';
 import { useTheme } from '../contexts/ThemeContext';
 import {
@@ -29,6 +30,22 @@ import {
   type AppConfig,
 } from '../services/configService';
 import {
+  createBackup,
+  deleteBackup,
+  listBackups,
+  restoreBackup,
+  startAutoBackupScheduler,
+  formatBackupSize,
+  parseBackupDate,
+  type BackupInfo,
+} from '../services/backupService';
+import {
+  AI_PROVIDER_PRESETS,
+  getProviderPreset,
+  aiListModels,
+  aiTestConnection,
+} from '../services/aiService';
+import {
   getShortcuts,
   saveShortcuts,
   resetShortcuts,
@@ -40,7 +57,7 @@ import {
 } from '../services/shortcutService';
 
 // 设置选项卡类型
-type SettingsTab = 'profile' | 'appearance' | 'editor' | 'shortcuts' | 'export' | 'backup' | 'about';
+type SettingsTab = 'profile' | 'appearance' | 'ai' | 'editor' | 'shortcuts' | 'export' | 'backup' | 'about';
 
 // 组件属性接口
 interface SettingsViewProps {
@@ -137,7 +154,17 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
 
     setSavingConfig(true);
     try {
-      await saveConfig(config);
+      // 外观主题由 ThemeContext 实时管理，保存时同步进配置文件，
+      // 下次启动由 App 应用配置中的主题
+      const configToSave = { ...config, theme: themeMode };
+      await saveConfig(configToSave);
+      setConfig(configToSave);
+
+      // 备份设置可能已变更，重启调度器使其立即生效
+      await startAutoBackupScheduler().catch((error) => {
+        console.warn('⚠️ 重启自动备份调度器失败:', error);
+      });
+
       showToast('配置已保存', 'success');
     } catch (error: any) {
       showToast(`保存失败: ${error}`, 'error');
@@ -235,6 +262,16 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
               onClick={() => setActiveTab('appearance')}
             />
 
+            {/* AI 服务 */}
+            <TabButton
+              icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>}
+              label="AI 服务"
+              active={activeTab === 'ai'}
+              onClick={() => setActiveTab('ai')}
+            />
+
             {/* 编辑器 */}
             <TabButton
               icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -294,6 +331,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
             <h3 className="text-lg font-semibold text-on-surface">
               {activeTab === 'profile' && '用户信息'}
               {activeTab === 'appearance' && '外观设置'}
+              {activeTab === 'ai' && 'AI 服务'}
               {activeTab === 'editor' && '编辑器设置'}
               {activeTab === 'shortcuts' && '快捷键配置'}
               {activeTab === 'export' && '导出设置'}
@@ -327,6 +365,9 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                 <AppearanceTab themeMode={themeMode} setThemeMode={setThemeMode} />
               )}
 
+              {/* AI 服务 Tab */}
+              {activeTab === 'ai' && <AiTab config={config} setConfig={setConfig} />}
+
               {/* 编辑器 Tab */}
               {activeTab === 'editor' && (
                 <EditorTab config={config} setConfig={setConfig} />
@@ -350,7 +391,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
 
               {/* 备份 Tab */}
               {activeTab === 'backup' && (
-                <BackupTab config={config} setConfig={setConfig} />
+                <BackupTab config={config} setConfig={setConfig} onNotify={showToast} />
               )}
 
               {/* 关于 Tab */}
@@ -377,7 +418,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
                 主题已自动保存
               </div>
             )}
-            {(activeTab === 'editor' || activeTab === 'export' || activeTab === 'backup') && (
+            {(activeTab === 'editor' || activeTab === 'export' || activeTab === 'backup' || activeTab === 'ai') && (
               <button
                 onClick={handleSaveConfig}
                 disabled={savingConfig}
@@ -835,9 +876,97 @@ function ExportTab({ config, setConfig }: ExportTabProps) {
 interface BackupTabProps {
   config: AppConfig;
   setConfig: (config: AppConfig) => void;
+  onNotify: (message: string, type?: 'success' | 'error' | 'warning' | 'info') => void;
 }
 
-function BackupTab({ config, setConfig }: BackupTabProps) {
+function BackupTab({ config, setConfig, onNotify }: BackupTabProps) {
+  const [backups, setBackups] = useState<BackupInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [backingUp, setBackingUp] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  // 加载备份列表
+  const refreshBackups = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await listBackups();
+      setBackups(list);
+    } catch (error) {
+      console.error('加载备份列表失败:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshBackups();
+  }, [refreshBackups]);
+
+  // 立即备份
+  const handleBackupNow = async () => {
+    setBackingUp(true);
+    try {
+      const info = await createBackup();
+      onNotify(`备份成功（${formatBackupSize(info.size)}）`, 'success');
+      await refreshBackups();
+      // createBackup 更新了配置中的 lastBackupAt，重新加载配置以刷新显示
+      const freshConfig = await loadConfig();
+      setConfig(freshConfig);
+    } catch (error: any) {
+      onNotify(`备份失败: ${error}`, 'error');
+    } finally {
+      setBackingUp(false);
+    }
+  };
+
+  // 删除备份
+  const handleDelete = async (name: string) => {
+    const confirmed = await ask(`确定删除备份 ${name} 吗？此操作不可恢复。`, {
+      title: '删除备份',
+      kind: 'warning',
+    });
+    if (!confirmed) return;
+
+    try {
+      await deleteBackup(name);
+      onNotify('备份已删除', 'success');
+      await refreshBackups();
+    } catch (error: any) {
+      onNotify(`删除失败: ${error}`, 'error');
+    }
+  };
+
+  // 从备份恢复
+  const handleRestore = async (name: string) => {
+    const confirmed = await ask(
+      `确定从备份 ${name} 恢复吗？\n\n当前所有作品和章节数据将被备份时的数据完全覆盖，且无法撤销。`,
+      { title: '恢复备份', kind: 'warning' }
+    );
+    if (!confirmed) return;
+
+    setRestoring(name);
+    try {
+      await restoreBackup(name);
+      await message('恢复完成，应用即将重新加载。', { title: '恢复备份', kind: 'info' });
+      // 数据库文件已替换，内存中的 store 数据已失效，重载应用重新初始化
+      window.location.reload();
+    } catch (error: any) {
+      onNotify(`恢复失败: ${error}`, 'error');
+      setRestoring(null);
+    }
+  };
+
+  // 格式化备份时间显示
+  const formatBackupTime = (name: string): string => {
+    const date = parseBackupDate(name);
+    if (!date) return '未知时间';
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return (
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+      ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    );
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex items-center gap-3">
@@ -896,13 +1025,270 @@ function BackupTab({ config, setConfig }: BackupTabProps) {
         </>
       )}
 
+      {/* 手动备份与备份列表 */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-semibold text-on-surface">备份文件</h4>
+          <div className="flex items-center gap-2">
+            {config.backup.lastBackupAt && (
+              <span className="text-xs text-on-surface-secondary">
+                上次备份：{new Date(config.backup.lastBackupAt).toLocaleString()}
+              </span>
+            )}
+            <button
+              onClick={handleBackupNow}
+              disabled={backingUp}
+              className="px-3 py-1.5 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {backingUp ? '备份中...' : '立即备份'}
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <p className="text-sm text-on-surface-secondary py-4 text-center">加载中...</p>
+        ) : backups.length === 0 ? (
+          <p className="text-sm text-on-surface-secondary py-4 text-center">
+            暂无备份，点击"立即备份"创建第一个备份
+          </p>
+        ) : (
+          <div className="border border-surface-border rounded-lg divide-y divide-surface-border max-h-64 overflow-y-auto">
+            {backups.map((backup) => (
+              <div key={backup.name} className="flex items-center justify-between px-4 py-2.5">
+                <div className="min-w-0">
+                  <p className="text-sm text-on-surface truncate">{formatBackupTime(backup.name)}</p>
+                  <p className="text-xs text-on-surface-secondary">{formatBackupSize(backup.size)}</p>
+                </div>
+                <div className="flex items-center gap-2 ml-4 shrink-0">
+                  <button
+                    onClick={() => handleRestore(backup.name)}
+                    disabled={restoring !== null}
+                    className="px-2.5 py-1 text-xs rounded-md border border-primary-300 text-primary-600 hover:bg-primary-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {restoring === backup.name ? '恢复中...' : '恢复'}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(backup.name)}
+                    disabled={restoring !== null}
+                    className="px-2.5 py-1 text-xs rounded-md border border-red-300 text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="p-4 bg-primary-50 rounded-lg border border-primary-200">
         <h4 className="text-sm font-semibold text-on-surface mb-2">备份说明</h4>
         <ul className="text-sm text-on-surface-secondary space-y-1 list-disc list-inside">
-          <li>备份文件存储在应用数据目录</li>
-          <li>包含所有作品和章节的完整数据</li>
+          <li>备份文件存储在应用数据目录的 backups 文件夹</li>
+          <li>包含所有作品和章节的完整数据（在线快照，无需退出应用）</li>
           <li>超过保留数量的旧备份会自动删除</li>
+          <li>恢复备份会覆盖当前全部数据，恢复前请谨慎确认</li>
         </ul>
+      </div>
+    </div>
+  );
+}
+
+// ========== AI 服务 Tab ==========
+interface AiTabProps {
+  config: AppConfig | null;
+  setConfig: (config: AppConfig) => void;
+}
+
+/**
+ * AI 服务配置页
+ *
+ * 【说明】
+ * 选择服务商预设后自动填充 Base URL 与默认模型；
+ * 本地服务（LM Studio / Ollama）可通过"获取模型列表"自动发现模型。
+ * 保存后由 AI 助手面板直接生效（Rust 后端转发请求，无 CORS 限制）。
+ */
+function AiTab({ config, setConfig }: AiTabProps) {
+  const { showToast } = useToast();
+
+  const [models, setModels] = useState<string[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  if (!config) return null;
+
+  const ai = config.ai;
+  const preset = getProviderPreset(ai.provider);
+
+  const updateAi = (patch: Partial<AppConfig['ai']>) => {
+    setConfig({ ...config, ai: { ...ai, ...patch } });
+  };
+
+  /** 切换预设：填充 Base URL 与默认模型 */
+  const handlePresetChange = (providerId: string) => {
+    const next = getProviderPreset(providerId);
+    if (!next) return;
+    setModels([]);
+    updateAi({ provider: providerId, baseUrl: next.baseUrl, model: next.defaultModel });
+  };
+
+  /** 拉取服务商可用模型 */
+  const handleFetchModels = async () => {
+    if (!ai.baseUrl) {
+      showToast('请先填写 API 地址', 'warning');
+      return;
+    }
+    setLoadingModels(true);
+    try {
+      const list = await aiListModels(ai.baseUrl, ai.apiKey);
+      setModels(list);
+      if (list.length === 0) showToast('服务未返回模型列表', 'info');
+    } catch (error: any) {
+      showToast(error.message || '获取模型列表失败', 'error');
+    } finally {
+      setLoadingModels(false);
+    }
+  };
+
+  /** 测试连通性 */
+  const handleTest = async () => {
+    if (!ai.baseUrl || !ai.model) {
+      showToast('请先填写 API 地址和模型', 'warning');
+      return;
+    }
+    setTesting(true);
+    try {
+      const reply = await aiTestConnection(ai);
+      showToast(`连接正常，模型回复：${reply.slice(0, 30)}`, 'success');
+    } catch (error: any) {
+      showToast(error.message || '连接失败', 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="p-4 bg-primary-50 rounded-lg border border-primary-200 text-sm text-on-surface-secondary">
+        配置任意 OpenAI 兼容服务后，即可在写作页使用 AI 续写、润色、摘要与审稿。
+        API Key 仅保存在本机配置文件中，请求由应用后端直接转发，不经过任何第三方。
+      </div>
+
+      {/* 服务商预设 */}
+      <div>
+        <label className="block text-sm font-medium text-on-surface mb-2">服务商</label>
+        <select
+          value={ai.provider}
+          onChange={(e) => handlePresetChange(e.target.value)}
+          className="form-input max-w-xs"
+        >
+          {AI_PROVIDER_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
+        </select>
+        {preset?.hint && (
+          <p className="mt-2 text-xs text-on-surface-secondary">{preset.hint}</p>
+        )}
+      </div>
+
+      {/* API 地址 */}
+      <div>
+        <label className="block text-sm font-medium text-on-surface mb-2">API 地址（Base URL）</label>
+        <input
+          type="text"
+          value={ai.baseUrl}
+          onChange={(e) => updateAi({ baseUrl: e.target.value })}
+          placeholder="https://api.example.com/v1"
+          className="form-input max-w-lg"
+        />
+      </div>
+
+      {/* API Key */}
+      <div>
+        <label className="block text-sm font-medium text-on-surface mb-2">API Key</label>
+        <input
+          type="password"
+          value={ai.apiKey}
+          onChange={(e) => updateAi({ apiKey: e.target.value })}
+          placeholder={preset?.requiresApiKey ? '必填' : '本地服务通常无需填写'}
+          className="form-input max-w-lg"
+          autoComplete="off"
+        />
+      </div>
+
+      {/* 模型 */}
+      <div>
+        <label className="block text-sm font-medium text-on-surface mb-2">模型</label>
+        <div className="flex items-center gap-2 max-w-lg">
+          {models.length > 0 ? (
+            <select
+              value={ai.model}
+              onChange={(e) => updateAi({ model: e.target.value })}
+              className="form-input flex-1"
+            >
+              {!models.includes(ai.model) && <option value={ai.model}>{ai.model || '请选择模型'}</option>}
+              {models.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          ) : (
+            <input
+              type="text"
+              value={ai.model}
+              onChange={(e) => updateAi({ model: e.target.value })}
+              placeholder="如 moonshot-v1-8k / deepseek-chat / glm-4-plus"
+              className="form-input flex-1"
+            />
+          )}
+          <button
+            onClick={handleFetchModels}
+            disabled={loadingModels}
+            className="px-3 py-2 text-xs rounded-lg border border-surface-border text-on-surface hover:bg-surface-secondary disabled:opacity-50 whitespace-nowrap"
+          >
+            {loadingModels ? '获取中…' : '获取模型列表'}
+          </button>
+        </div>
+      </div>
+
+      {/* 生成参数 */}
+      <div className="grid grid-cols-2 gap-4 max-w-lg">
+        <div>
+          <label className="block text-sm font-medium text-on-surface mb-2">温度（{ai.temperature}）</label>
+          <input
+            type="range"
+            min="0"
+            max="2"
+            step="0.1"
+            value={ai.temperature}
+            onChange={(e) => updateAi({ temperature: parseFloat(e.target.value) })}
+            className="w-full"
+          />
+          <p className="text-xs text-on-surface-secondary mt-1">越低越稳定，越高越发散</p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-on-surface mb-2">最大 Token</label>
+          <input
+            type="number"
+            min="256"
+            max="32000"
+            step="256"
+            value={ai.maxTokens}
+            onChange={(e) => updateAi({ maxTokens: parseInt(e.target.value) || 2048 })}
+            className="form-input"
+          />
+        </div>
+      </div>
+
+      {/* 测试 */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={handleTest}
+          disabled={testing}
+          className="px-4 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+        >
+          {testing ? '测试中…' : '测试连接'}
+        </button>
+        <p className="text-xs text-on-surface-secondary">发送一条极短消息验证服务可用性</p>
       </div>
     </div>
   );

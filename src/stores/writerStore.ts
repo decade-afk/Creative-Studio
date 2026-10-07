@@ -97,6 +97,9 @@ interface UIState {
   /** 是否显示新建章节对话框 */
   showNewChapterDialog: boolean;
 
+  /** 是否显示 AI 助手面板 */
+  showAiPanel: boolean;
+
   /** 当前选中的图标 emoji（用于创建新作品） */
   selectedIcon: string;
 
@@ -241,6 +244,18 @@ interface WriterStore extends EditorState, UIState, DataState {
    * - 响应式布局自动切换
    */
   toggleDrawer: () => void;
+
+  /**
+   * 设置 AI 助手面板显示状态
+   *
+   * @param show - true 显示，false 隐藏
+   */
+  setShowAiPanel: (show: boolean) => void;
+
+  /**
+   * 切换 AI 助手面板显示状态
+   */
+  toggleAiPanel: () => void;
 
   /**
    * 设置导出对话框显示状态
@@ -456,6 +471,7 @@ export const useWriterStore = create<WriterStore>((set, get) => ({
   // 初始状态 - UI
   // ==========================================================================
   showDrawer: false,              // 侧边栏默认隐藏
+  showAiPanel: false,             // AI 助手面板默认隐藏
   showExportDialog: false,        // 导出对话框默认隐藏
   showNewWorkDialog: false,       // 新建作品对话框默认隐藏
   showNewChapterDialog: false,    // 新建章节对话框默认隐藏
@@ -534,6 +550,10 @@ export const useWriterStore = create<WriterStore>((set, get) => ({
    * - 避免闭包问题
    */
   toggleDrawer: () => set((state) => ({ showDrawer: !state.showDrawer })),
+
+  setShowAiPanel: (showAiPanel) => set({ showAiPanel }),
+
+  toggleAiPanel: () => set((state) => ({ showAiPanel: !state.showAiPanel })),
 
   /**
    * 更新导出对话框显示状态

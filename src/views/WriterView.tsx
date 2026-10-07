@@ -32,18 +32,21 @@
  * 5. showToast 和 hideToast 使用 useCallback 包裹，引用保持稳定
  */
 
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import type { WorkType } from '../types/storage';
 import type { ExportFormat } from '../types/export';
 import { getWorks, createWork, deleteWork } from '../services/workService';
 import { getChaptersByWorkId, updateChapter, createChapter, deleteChapter } from '../services/chapterService';
 import { exportWork, getWorkExportFormats } from '../services/exportService';
 import { getDatabase } from '../services/database';
+import { loadConfig, updateConfig } from '../services/configService';
 
 import { useWriterStore } from '../stores/writerStore';
 import WriterSidebar from '../components/WriterSidebar';
 import WriterEditor from '../components/WriterEditor';
 import WriterTopBar from '../components/WriterTopBar';
+import AiAssistantPanel from '../components/AiAssistantPanel';
+import VersionsDialog from '../components/VersionsDialog';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
 
@@ -74,12 +77,14 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
     currentChapterId,
     exportProgress,
     deletingItem,
+    dbReady,
 
     // UI 状态
     showDrawer,
     showExportDialog,
     showNewWorkDialog,
     showNewChapterDialog,
+    showAiPanel,
     selectedIcon,
 
     // 编辑器状态
@@ -98,6 +103,8 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
     setShowExportDialog,
     setShowNewWorkDialog,
     setShowNewChapterDialog,
+    setShowAiPanel,
+    toggleAiPanel,
     setSelectedIcon,
     setEditorContent,
     setWordCount,
@@ -115,6 +122,9 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
 
   // Toast 通知
     const { showToast, ToastComponent } = useToast();
+
+  // 版本历史对话框
+  const [showVersionsDialog, setShowVersionsDialog] = useState(false);
   
   /**
      * 计算字数
@@ -152,13 +162,22 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
         setWorks(loadedWorks);
         console.log(`✅ 加载了 ${loadedWorks.length} 个作品`);
 
-        // 3. 如果有作品，选中第一个
+        // 3. 优先恢复上次打开的作品，否则选中第一个
         if (loadedWorks.length > 0) {
-          const firstWork = loadedWorks[0];
-          setCurrentWorkId(firstWork.id);
+          let targetWork = loadedWorks[0];
+          try {
+            const config = await loadConfig();
+            const lastWork = config.lastOpenedWorkId
+              ? loadedWorks.find((w) => w.id === config.lastOpenedWorkId)
+              : undefined;
+            if (lastWork) targetWork = lastWork;
+          } catch {
+            // 配置读取失败时回退到第一个作品，不阻塞初始化
+          }
+          setCurrentWorkId(targetWork.id);
 
-          // 4. 加载第一个作品的章节
-          const loadedChapters = await getChaptersByWorkId(firstWork.id);
+          // 4. 加载目标作品的章节
+          const loadedChapters = await getChaptersByWorkId(targetWork.id);
           setChapters(loadedChapters);
           console.log(`✅ 加载了 ${loadedChapters.length} 个章节`);
 
@@ -187,6 +206,43 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // showToast 通过 useCallback 保持稳定，可以安全忽略
+
+  /**
+   * 当前作品变化时，将其持久化到配置文件的 lastOpenedWorkId
+   * 下次启动时由 initializeData 恢复
+   *
+   * 【说明】
+   * - 等待 dbReady，避免数据库尚未就绪时的空 currentWorkId 触发写入
+   * - 写入失败只记录警告，不影响创作流程
+   */
+  useEffect(() => {
+    if (!dbReady || !currentWorkId) return;
+
+    updateConfig({ lastOpenedWorkId: currentWorkId }).catch((error) => {
+      console.warn('⚠️ 保存最近打开作品失败:', error);
+    });
+  }, [dbReady, currentWorkId]);
+
+  /**
+   * Ctrl+S 立即保存（App 级快捷键派发 creative-studio:save 事件）
+   */
+  useEffect(() => {
+    const handler = async () => {
+      if (editorRef.current && currentChapterId) {
+        try {
+          await updateChapter(currentChapterId, { content: editorRef.current.innerHTML });
+          showToast('已保存', 'success');
+        } catch (error) {
+          console.error('手动保存失败:', error);
+          showToast('保存失败', 'error');
+        }
+      }
+    };
+    window.addEventListener('creative-studio:save', handler as EventListener);
+    return () => window.removeEventListener('creative-studio:save', handler as EventListener);
+    // showToast 稳定，editorRef 为引用
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChapterId]);
 
   /**
    * 当切换作品时，加载对应的章节
@@ -493,6 +549,18 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
       {/* Toast Notification */}
       {ToastComponent}
 
+      {/* 版本历史对话框 */}
+      {showVersionsDialog && (
+        <VersionsDialog
+          onClose={() => setShowVersionsDialog(false)}
+          onRestored={(content) => {
+            setEditorContent(content);
+            setShouldSyncContent(true);
+            setWordCount(calculateWordCount(content));
+          }}
+        />
+      )}
+
       {/* Confirm Dialog */}
       {deletingItem && (
         <ConfirmDialog
@@ -529,6 +597,9 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
         <WriterTopBar
           onToggleDrawer={() => setShowDrawer(!showDrawer)}
           onShowExportDialog={() => setShowExportDialog(true)}
+          onToggleAiPanel={toggleAiPanel}
+          onShowVersions={() => setShowVersionsDialog(true)}
+          aiPanelOpen={showAiPanel}
         />
 
         {/* Main Content Area */}
@@ -543,6 +614,14 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
               }
             }}
           />
+
+          {/* AI 创作助手面板 */}
+          {showAiPanel && (
+            <AiAssistantPanel
+              editorRef={editorRef}
+              onClose={() => setShowAiPanel(false)}
+            />
+          )}
 
           {/* AI Drawer (conditional) */}
           {showDrawer && (

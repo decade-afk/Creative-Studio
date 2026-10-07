@@ -18,18 +18,24 @@ interface TitleBarProps {
   documentName?: string;        // 当前文档名称
   onNewWork?: () => void;        // 新建作品回调
   onNewChapter?: () => void;     // 新建章节回调
+  onImport?: () => void;         // 导入作品回调
   onExport?: () => void;         // 导出回调
   onSettings?: () => void;       // 设置回调
   onToggleSidebar?: () => void;  // 切换侧边栏回调
+  onSearch?: () => void;         // 全局搜索回调
+  onToggleAiPanel?: () => void;  // 切换 AI 助手面板回调
 }
 
 export default function TitleBar({
   documentName,
   onNewWork,
   onNewChapter,
+  onImport,
   onExport,
   onSettings,
   onToggleSidebar,
+  onSearch,
+  onToggleAiPanel,
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [isMacOS, setIsMacOS] = useState(false);
@@ -310,9 +316,12 @@ export default function TitleBar({
               <AppMenu
                 onNewWork={onNewWork}
                 onNewChapter={onNewChapter}
+                onImport={onImport}
                 onExport={onExport}
                 onSettings={onSettings}
                 onToggleSidebar={onToggleSidebar}
+                onSearch={onSearch}
+                onToggleAiPanel={onToggleAiPanel}
               />
             </div>
 
@@ -378,9 +387,12 @@ export default function TitleBar({
               <AppMenu
                 onNewWork={onNewWork}
                 onNewChapter={onNewChapter}
+                onImport={onImport}
                 onExport={onExport}
                 onSettings={onSettings}
                 onToggleSidebar={onToggleSidebar}
+                onSearch={onSearch}
+                onToggleAiPanel={onToggleAiPanel}
               />
             </div>
 

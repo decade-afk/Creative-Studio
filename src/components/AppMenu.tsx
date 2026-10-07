@@ -27,17 +27,23 @@ interface MenuSection {
 interface AppMenuProps {
   onNewWork?: () => void;
   onNewChapter?: () => void;
+  onImport?: () => void;
   onExport?: () => void;
   onSettings?: () => void;
   onToggleSidebar?: () => void;
+  onSearch?: () => void;
+  onToggleAiPanel?: () => void;
 }
 
 export default function AppMenu({
   onNewWork,
   onNewChapter,
+  onImport,
   onExport,
   onSettings,
-  onToggleSidebar
+  onToggleSidebar,
+  onSearch,
+  onToggleAiPanel
 }: AppMenuProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -73,6 +79,10 @@ export default function AppMenu({
         },
         { divider: true },
         {
+          label: '导入作品（TXT/Markdown）...',
+          onClick: onImport
+        },
+        {
           label: '导出...',
           shortcut: formatShortcut(ShortcutPresets.export(() => {})),
           onClick: onExport
@@ -89,6 +99,17 @@ export default function AppMenu({
       title: '编辑',
       items: [
         {
+          label: '全局搜索',
+          shortcut: formatShortcut(ShortcutPresets.find(() => {})),
+          onClick: onSearch
+        },
+        {
+          label: 'AI 创作助手',
+          shortcut: 'Ctrl+J',
+          onClick: onToggleAiPanel
+        },
+        { divider: true },
+        {
           label: '撤销',
           shortcut: formatShortcut(ShortcutPresets.undo(() => {})),
           disabled: true
@@ -100,12 +121,7 @@ export default function AppMenu({
         },
         { divider: true },
         {
-          label: '查找',
-          shortcut: formatShortcut(ShortcutPresets.find(() => {})),
-          disabled: true
-        },
-        {
-          label: '替换',
+          label: '查找替换',
           shortcut: formatShortcut(ShortcutPresets.replace(() => {})),
           disabled: true
         },

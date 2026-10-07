@@ -320,3 +320,154 @@ export async function getWorkTotalWordCount(workId: string): Promise<number> {
 
   return totalWords;
 }
+
+// ============================================================================
+// 章节版本快照
+// ============================================================================
+
+/** 章节版本快照 */
+export interface ChapterVersion {
+  id: string;
+  chapter_id: string;
+  work_id: string;
+  title: string;
+  content: string;
+  word_count: number;
+  label: string;
+  created_at: string;
+}
+
+/** 每章保留的版本上限（超出自动清理最旧的） */
+const MAX_VERSIONS_PER_CHAPTER = 20;
+
+/**
+ * 保存章节版本快照
+ *
+ * 用于手动"保存版本"以及 AI 改写、版本恢复等关键操作前的安全快照
+ *
+ * @param chapterId 章节 ID
+ * @param label 版本说明（如"AI 续写前"、"手动备份"）
+ * @param contentOverride 可选，显式指定内容（默认读取当前章节内容）
+ */
+export async function saveChapterVersion(
+  chapterId: string,
+  label: string = '',
+  contentOverride?: string
+): Promise<ChapterVersion> {
+  const db = await getDatabase();
+
+  const chapter = await getChapterById(chapterId);
+  if (!chapter) {
+    throw new Error('章节不存在');
+  }
+
+  const content = contentOverride ?? chapter.content;
+  const text = content.replace(/<[^>]*>/g, '');
+  const wordCount =
+    (text.match(/[\u4e00-\u9fa5]/g) || []).length + (text.match(/[a-zA-Z]+/g) || []).length;
+
+  const version: ChapterVersion = {
+    id: generateUUID(),
+    chapter_id: chapterId,
+    work_id: chapter.work_id,
+    title: chapter.title,
+    content,
+    word_count: wordCount,
+    label,
+    created_at: getCurrentTimestamp(),
+  };
+
+  await db.execute(
+    `INSERT INTO chapter_versions (id, chapter_id, work_id, title, content, word_count, label, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      version.id,
+      version.chapter_id,
+      version.work_id,
+      version.title,
+      version.content,
+      version.word_count,
+      version.label,
+      version.created_at,
+    ]
+  );
+
+  await pruneChapterVersions(chapterId);
+  return version;
+}
+
+/**
+ * 列出章节的版本快照（按时间倒序，不含内容正文以减小传输）
+ */
+export async function listChapterVersions(
+  chapterId: string
+): Promise<Omit<ChapterVersion, 'content'>[]> {
+  const db = await getDatabase();
+  return await db.select<Omit<ChapterVersion, 'content'>[]>(
+    `SELECT id, chapter_id, work_id, title, word_count, label, created_at
+     FROM chapter_versions WHERE chapter_id = $1
+     ORDER BY created_at DESC`,
+    [chapterId]
+  );
+}
+
+/**
+ * 读取某个版本的完整内容
+ */
+export async function getChapterVersionContent(versionId: string): Promise<ChapterVersion | null> {
+  const db = await getDatabase();
+  const rows = await db.select<ChapterVersion[]>(
+    'SELECT * FROM chapter_versions WHERE id = $1',
+    [versionId]
+  );
+  return rows[0] || null;
+}
+
+/**
+ * 恢复章节到指定版本
+ *
+ * 恢复前会先将当前内容保存为快照（label="恢复前"），防止误操作无法回退
+ */
+export async function restoreChapterVersion(versionId: string): Promise<Chapter> {
+  const db = await getDatabase();
+  const version = await getChapterVersionContent(versionId);
+  if (!version) {
+    throw new Error('版本不存在');
+  }
+
+  // 恢复前保存当前状态
+  await saveChapterVersion(version.chapter_id, '恢复前');
+
+  await db.execute(
+    `UPDATE chapters SET content = $1, updated_at = $2 WHERE id = $3`,
+    [version.content, getCurrentTimestamp(), version.chapter_id]
+  );
+
+  const chapter = await getChapterById(version.chapter_id);
+  if (!chapter) {
+    throw new Error('章节不存在');
+  }
+  return chapter;
+}
+
+/**
+ * 删除版本快照
+ */
+export async function deleteChapterVersion(versionId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.execute('DELETE FROM chapter_versions WHERE id = $1', [versionId]);
+}
+
+/**
+ * 清理超出数量上限的旧版本
+ */
+async function pruneChapterVersions(chapterId: string): Promise<void> {
+  const db = await getDatabase();
+  await db.execute(
+    `DELETE FROM chapter_versions WHERE chapter_id = $1 AND id NOT IN (
+       SELECT id FROM chapter_versions WHERE chapter_id = $1
+       ORDER BY created_at DESC LIMIT $2
+     )`,
+    [chapterId, MAX_VERSIONS_PER_CHAPTER]
+  );
+}

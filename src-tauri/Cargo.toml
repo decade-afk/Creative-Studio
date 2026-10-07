@@ -1,6 +1,6 @@
 [package]
 name = "creative-studio-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Creative Studio Desktop Application"
 authors = ["you"]
 license = "MIT"
@@ -33,6 +33,20 @@ tauri-plugin-shell = "2"
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# AI 服务调用（OpenAI 兼容 API，流式响应）
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+futures-util = "0.3"
+
+# 文档导出（DOCX 手工打包、EPUB 电子书）
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+epub-builder = "0.5"
+
+# HTML 文本处理
+html-escape = "0.2"
+
+# 打印预览临时文件
+tempfile = "3"
 
 # 错误处理
 anyhow = "1.0"          # 简化错误处理

@@ -13,6 +13,7 @@
  */
 
 // 模块声明
+mod ai;
 mod export;
 mod validation;
 mod errors;
@@ -84,12 +85,17 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // 导出功能命令
             export::export_to_txt,      // 导出为 TXT
-            export::export_to_pdf,      // 导出为 PDF
-            export::export_to_word,     // 导出为 Word
+            export::export_to_pdf,      // 打印预览（另存为 PDF）
+            export::export_to_word,     // 导出为 Word (.docx)
             export::export_to_markdown, // 导出为 Markdown
             export::export_to_html,     // 导出为 HTML
-            export::export_to_script,   // 导出为分镜脚本
+            export::export_to_script,   // 导出为 Fountain 分镜脚本
             export::export_to_epub,     // 导出为 EPUB
+
+            // AI 服务命令
+            ai::ai_chat_stream,         // 流式对话补全
+            ai::ai_cancel,              // 取消流式请求
+            ai::ai_list_models,         // 获取可用模型列表
         ])
 
         // ========== 第五步：运行应用 ==========

@@ -36,14 +36,24 @@
  * 3. 视图组件内部管理自己的状态和数据
  */
 
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import TitleBar from './components/TitleBar';
 import AppNavigation from './components/AppNavigation';
 import WriterView from './views/WriterView';
 import DirectorView from './views/DirectorView';
 import PlannerView from './views/PlannerView';
 import SettingsView from './views/SettingsView';
+import SearchPanel from './components/SearchPanel';
 import { useKeyboardShortcuts, ShortcutPresets } from './hooks/useKeyboardShortcuts';
+import { useWriterStore } from './stores/writerStore';
+import { useTheme } from './contexts/ThemeContext';
+import { useToast } from './components/Toast';
+import { loadConfig, updateConfig } from './services/configService';
+import { startAutoBackupScheduler } from './services/backupService';
+import { getWorks } from './services/workService';
+import { getChaptersByWorkId } from './services/chapterService';
+import { importWorkFromFile } from './services/importService';
+import { calculateWordCount } from './utils/wordCount';
 
 // ============================================================================
 // 类型定义
@@ -118,14 +128,160 @@ function App() {
   /**
    * 当前文档名称
    *
-   * 【默认值】
-   * - '': 空字符串
-   *
-   * 【用途】
-   * - 在标题栏显示当前编辑的文档名称
-   * - 暂时为空，未来可以根据当前作品/章节动态设置
+   * 【数据来源】
+   * - writerStore 中的当前作品和章节
+   * - 格式："作品名 / 章节名"，无章节时仅显示作品名
    */
-  const currentDocumentName = '';
+  const works = useWriterStore((state) => state.works);
+  const currentWorkId = useWriterStore((state) => state.currentWorkId);
+  const chapters = useWriterStore((state) => state.chapters);
+  const currentChapterId = useWriterStore((state) => state.currentChapterId);
+  const currentDocumentName = useMemo(() => {
+    const work = works.find((w) => w.id === currentWorkId);
+    if (!work) return '';
+    const chapter = chapters.find((c) => c.id === currentChapterId);
+    return chapter ? `${work.title} / ${chapter.title}` : work.title;
+  }, [works, currentWorkId, chapters, currentChapterId]);
+
+  // ==========================================================================
+  // 全局搜索 / 导入 / Toast
+  // ==========================================================================
+
+  const [showSearch, setShowSearch] = useState(false);
+  const { showToast, ToastComponent } = useToast();
+
+  /**
+   * 跳转到指定章节（搜索结果点击）
+   *
+   * 【执行逻辑】
+   * 1. 切换到创作视图
+   * 2. 目标作品与当前不同：加载其章节列表后再选中目标章节
+   * 3. 内容同步后尝试用 window.find 滚动定位关键词
+   */
+  const handleOpenChapter = async (workId: string, chapterId: string, keyword: string) => {
+    setCurrentView('writer');
+    const store = useWriterStore.getState();
+
+    try {
+      if (store.currentWorkId !== workId) {
+        store.setCurrentWorkId(workId);
+        const loadedChapters = await getChaptersByWorkId(workId);
+        store.setChapters(loadedChapters);
+        const chapter = loadedChapters.find((c) => c.id === chapterId);
+        if (chapter) {
+          store.setCurrentChapterId(chapter.id);
+          store.setEditorContent(chapter.content || '');
+          store.setShouldSyncContent(true);
+          store.setWordCount(calculateWordCount(chapter.content || ''));
+        }
+      } else {
+        const chapter = store.chapters.find((c) => c.id === chapterId);
+        if (chapter) {
+          store.setCurrentChapterId(chapter.id);
+          store.setEditorContent(chapter.content || '');
+          store.setShouldSyncContent(true);
+          store.setWordCount(calculateWordCount(chapter.content || ''));
+        }
+      }
+
+      // 等 DOM 同步完成后尝试定位关键词（window.find 为 Chromium 能力）
+      setTimeout(() => {
+        try {
+          (window as any).find?.(keyword);
+        } catch {
+          // 定位失败不影响打开章节
+        }
+      }, 600);
+    } catch (error) {
+      console.error('打开章节失败:', error);
+      showToast('打开章节失败', 'error');
+    }
+  };
+
+  /**
+   * 导入作品（TXT / Markdown）
+   */
+  const handleImport = async () => {
+    setCurrentView('writer');
+    try {
+      const result = await importWorkFromFile('novel');
+      if (!result) return;
+
+      const store = useWriterStore.getState();
+      const loadedWorks = await getWorks();
+      store.setWorks(loadedWorks);
+      store.setCurrentWorkId(result.workId);
+
+      const loadedChapters = await getChaptersByWorkId(result.workId);
+      store.setChapters(loadedChapters);
+      const first = loadedChapters[0];
+      if (first) {
+        store.setCurrentChapterId(first.id);
+        store.setEditorContent(first.content || '');
+        store.setShouldSyncContent(true);
+        store.setWordCount(calculateWordCount(first.content || ''));
+      }
+
+      showToast(`导入成功：「${result.title}」共 ${result.chapterCount} 章`, 'success');
+    } catch (error: any) {
+      console.error('导入失败:', error);
+      showToast(`导入失败: ${error.message || error}`, 'error');
+    }
+  };
+
+  /**
+   * 切换 AI 助手面板（菜单/快捷键入口，仅创作视图）
+   */
+  const handleToggleAiPanel = () => {
+    setCurrentView('writer');
+    useWriterStore.getState().toggleAiPanel();
+  };
+
+  // ==========================================================================
+  // 启动配置集成
+  // ==========================================================================
+
+  /**
+   * 应用启动时加载配置文件
+   *
+   * 【执行流程】
+   * 1. 读取 config.json（读取失败时 configService 内部回退到默认配置）
+   * 2. 将配置中的主题应用到 ThemeContext（配置文件为启动时的权威来源）
+   * 3. 清除首次启动标记
+   * 4. 启动自动备份调度器（含启动补齐逻辑）
+   */
+  const { setMode: setThemeMode } = useTheme();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const config = await loadConfig();
+        if (cancelled) return;
+
+        // 配置文件中的主题优先于 localStorage（保存配置时会同步写入两者）
+        const savedMode = localStorage.getItem('theme-mode');
+        if (config.theme && config.theme !== savedMode) {
+          setThemeMode(config.theme);
+        }
+
+        if (config.isFirstLaunch) {
+          await updateConfig({ isFirstLaunch: false });
+        }
+
+        await startAutoBackupScheduler();
+      } catch (error) {
+        console.error('❌ 启动配置加载失败:', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // setMode 来自 ThemeContext，引用稳定；仅在挂载时执行一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ==========================================================================
   // 事件处理函数
@@ -172,54 +328,52 @@ function App() {
    * 处理新建作品
    *
    * 【触发时机】
-   * - 用户点击标题栏的"新建作品"菜单项
+   * - 用户点击标题栏的"新建作品"菜单项或按下 Ctrl+N
    *
-   * 【当前实现】
-   * - 暂时为占位符，输出日志
-   * - 实际功能由 WriterView 内部的新建按钮触发
-   *
-   * 【未来扩展】
-   * - 可以在这里实现全局新建作品功能
-   * - 或者在各视图内部实现，保持功能内聚
+   * 【执行逻辑】
+   * 1. 切换到创作视图（对话框在 WriterView 中渲染）
+   * 2. 打开 writerStore 中的新建作品对话框
    */
   const handleNewWork = () => {
-    console.log('新建作品功能暂由视图内部按钮触发');
+    setCurrentView('writer');
+    useWriterStore.getState().setShowNewWorkDialog(true);
   };
 
   /**
    * 处理新建章节
    *
    * 【触发时机】
-   * - 用户点击标题栏的"新建章节"菜单项
+   * - 用户点击标题栏的"新建章节"菜单项或按下 Ctrl+Shift+N
    *
-   * 【当前实现】
-   * - 暂时为占位符，输出日志
-   * - 实际功能由 WriterView 内部的新建按钮触发
-   *
-   * 【未来扩展】
-   * - 可以在这里实现全局新建章节功能
-   * - 或者在 WriterView 内部实现，保持功能内聚
+   * 【执行逻辑】
+   * 1. 切换到创作视图
+   * 2. 已选中作品：打开新建章节对话框
+   * 3. 未选中作品：章节必须隶属于作品，改为打开新建作品对话框
    */
   const handleNewChapter = () => {
-    console.log('新建章节功能暂由视图内部按钮触发');
+    setCurrentView('writer');
+    const { currentWorkId, setShowNewWorkDialog, setShowNewChapterDialog } =
+      useWriterStore.getState();
+    if (currentWorkId) {
+      setShowNewChapterDialog(true);
+    } else {
+      setShowNewWorkDialog(true);
+    }
   };
 
   /**
    * 处理导出
    *
    * 【触发时机】
-   * - 用户点击标题栏的"导出"菜单项
+   * - 用户点击标题栏的"导出"菜单项或按下 Ctrl+E
    *
-   * 【当前实现】
-   * - 暂时为占位符，输出日志
-   * - 实际功能由各视图内部的导出按钮触发
-   *
-   * 【未来扩展】
-   * - 可以在这里实现全局导出功能
-   * - 或者在各视图内部实现，根据视图类型选择导出格式
+   * 【执行逻辑】
+   * 1. 切换到创作视图
+   * 2. 打开 writerStore 中的导出对话框
    */
   const handleExport = () => {
-    console.log('导出功能暂由视图内部按钮触发');
+    setCurrentView('writer');
+    useWriterStore.getState().setShowExportDialog(true);
   };
 
   /**
@@ -262,6 +416,17 @@ function App() {
     ShortcutPresets.export(handleExport),
     ShortcutPresets.settings(() => setShowSettings(true)),
     ShortcutPresets.toggleSidebar(handleToggleSidebar),
+    ShortcutPresets.find(() => setShowSearch(true)),
+    ShortcutPresets.save(() => {
+      // 触发 WriterView 的立即保存（监听 window 事件）
+      window.dispatchEvent(new CustomEvent('creative-studio:save'));
+    }),
+    {
+      key: 'j',
+      ctrl: true,
+      handler: handleToggleAiPanel,
+      description: 'AI 创作助手',
+    },
   ]);
 
   // ==========================================================================
@@ -309,9 +474,12 @@ function App() {
         documentName={currentDocumentName}
         onNewWork={handleNewWork}
         onNewChapter={handleNewChapter}
+        onImport={handleImport}
         onExport={handleExport}
         onSettings={() => setShowSettings(true)}
         onToggleSidebar={handleToggleSidebar}
+        onSearch={() => setShowSearch(true)}
+        onToggleAiPanel={handleToggleAiPanel}
       />
 
       {/* ========================================================================
@@ -391,6 +559,17 @@ function App() {
           - AI 功能已移除，无需进行 AI 配置检查
       */}
       {showSettings && <SettingsView onClose={() => setShowSettings(false)} />}
+
+      {/* 全局搜索面板 */}
+      {showSearch && (
+        <SearchPanel
+          onClose={() => setShowSearch(false)}
+          onOpenChapter={handleOpenChapter}
+        />
+      )}
+
+      {/* 全局 Toast */}
+      {ToastComponent}
     </div>
   );
 }
