@@ -251,6 +251,7 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
       if (editorRef.current && currentChapterId) {
         try {
           await updateChapter(currentChapterId, { content: editorRef.current.innerHTML });
+          window.dispatchEvent(new CustomEvent('creative-studio:saved'));
           showToast('已保存', 'success');
         } catch (error) {
           console.error('手动保存失败:', error);
@@ -633,6 +634,7 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
               if (currentChapterId) {
                 await updateChapter(currentChapterId, { content });
                 console.log('💾 章节已自动保存');
+                window.dispatchEvent(new CustomEvent('creative-studio:saved'));
               }
             }}
           />

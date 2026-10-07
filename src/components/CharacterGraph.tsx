@@ -24,17 +24,31 @@ const SIZE = 560;
 const CENTER = SIZE / 2;
 const RADIUS = SIZE / 2 - 90;
 
-/** 解析关系边：A 描述含 B 名 或 B 描述含 A 名 */
+/** 解析关系边：宽松匹配——A 提及 B 的名字，或提及 B 名字中长度≥2 的片段
+ *  （如"站长老周"与"老周"视为同一人），取提及方的关系描述为标签 */
 function buildEdges(characters: Character[]): { a: number; b: number; label: string }[] {
   const edges: { a: number; b: number; label: string }[] = [];
+
+  /** text 是否提及 name（完整名，或名字里≥2字的连续片段） */
+  const mentions = (text: string, name: string): boolean => {
+    if (!text || !name) return false;
+    if (text.includes(name)) return true;
+    // 生成名字的所有连续子串（长度>=2），任一命中即视为提及
+    for (let len = name.length - 1; len >= 2; len--) {
+      for (let start = 0; start + len <= name.length; start++) {
+        if (text.includes(name.slice(start, start + len))) return true;
+      }
+    }
+    return false;
+  };
+
   for (let i = 0; i < characters.length; i++) {
     for (let j = i + 1; j < characters.length; j++) {
       const a = characters[i];
       const b = characters[j];
-      const aMentionsB = (a.relationships || '').includes(b.name);
-      const bMentionsA = (b.relationships || '').includes(a.name);
+      const aMentionsB = mentions(a.relationships || '', b.name);
+      const bMentionsA = mentions(b.relationships || '', a.name);
       if (aMentionsB || bMentionsA) {
-        // 边标签取提及方的关系描述（截断到 20 字）
         const label = aMentionsB ? a.relationships || '' : b.relationships || '';
         edges.push({ a: i, b: j, label: label.slice(0, 20) });
       }

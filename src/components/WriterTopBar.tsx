@@ -38,6 +38,8 @@ export default function WriterTopBar({
   const [totalWords, setTotalWords] = useState<number | null>(null);
   // 每日目标与今日字数
   const [dailyGoal, setDailyGoal] = useState(0);
+  // 保存完成信号（配合 creative-studio:saved 事件刷新全书字数）
+  const [saveTick, setSaveTick] = useState(0);
   const [todayWords, setTodayWords] = useState(0);
 
   useEffect(() => {
@@ -71,7 +73,15 @@ export default function WriterTopBar({
     return () => {
       cancelled = true;
     };
-  }, [currentWorkId, wordCount]);
+  }, [currentWorkId, wordCount, saveTick]);
+
+  // 自动保存完成后刷新全书字数（保存事件由 WriterEditor/手动保存派发，
+  // 早于保存的 wordCount 变化会让 DB 查询拿到旧值，这里在保存落库后再查一次）
+  useEffect(() => {
+    const handler = () => setSaveTick((t) => t + 1);
+    window.addEventListener('creative-studio:saved', handler);
+    return () => window.removeEventListener('creative-studio:saved', handler);
+  }, []);
 
   return (
     <div className="h-16 border-b border-outline flex items-center justify-between px-8 bg-surface-primary flex-shrink-0">

@@ -692,8 +692,18 @@ function App() {
         <TrashDialog
           onClose={() => setShowTrash(false)}
           onChanged={() => {
-            // 恢复/删除作品后刷新侧边栏列表
-            getWorks().then((loaded) => useWriterStore.getState().setWorks(loaded)).catch(() => undefined);
+            // 恢复/删除后刷新侧边栏的作品与当前作品的章节列表
+            const store = useWriterStore.getState();
+            getWorks()
+              .then(async (loaded) => {
+                store.setWorks(loaded);
+                const active = store.currentWorkId || loaded[0]?.id;
+                if (active) {
+                  const chapters = await getChaptersByWorkId(active);
+                  useWriterStore.getState().setChapters(chapters);
+                }
+              })
+              .catch(() => undefined);
           }}
         />
       )}
