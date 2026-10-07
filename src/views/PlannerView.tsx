@@ -64,7 +64,13 @@ import {
   aiCancel,
   buildOutlineMessages,
   parseOutlineText,
+  buildCharacterMessages,
+  parseCharacterJson,
+  buildSceneMessages,
+  parseSceneJson,
   type ParsedOutlineChapter,
+  type ParsedCharacter,
+  type ParsedScene,
 } from '../services/aiService';
 import { 
   getWorldSettings, 
@@ -118,6 +124,16 @@ export default function PlannerView() {
   const [aiParsed, setAiParsed] = useState<ParsedOutlineChapter[]>([]);
   const [aiApplying, setAiApplying] = useState(false);
   const aiRequestRef = useRef<string | null>(null);
+
+  // AI 角色/场景生成（共用对话框）
+  const [aiGenKind, setAiGenKind] = useState<'characters' | 'scenes' | null>(null);
+  const [aiGenPremise, setAiGenPremise] = useState('');
+  const [aiGenCount, setAiGenCount] = useState(5);
+  const [aiGenOutput, setAiGenOutput] = useState('');
+  const [aiGenRunning, setAiGenRunning] = useState(false);
+  const [aiGenParsed, setAiGenParsed] = useState<ParsedCharacter[] | ParsedScene[]>([]);
+  const [aiGenApplying, setAiGenApplying] = useState(false);
+  const aiGenRequestRef = useRef<string | null>(null);
 
   // 与全局当前作品保持一致（创作视图切换作品后这里自动跟随）
   useEffect(() => {
@@ -348,6 +364,8 @@ export default function PlannerView() {
             icon_type: setting.icon_type,
             icon_color: setting.icon_color,
             tags: setting.tags,
+            related_characters: setting.related_characters,
+            related_settings: setting.related_settings,
           });
           showToast('世界观设定更新成功', 'success');
           break;
@@ -574,6 +592,98 @@ export default function PlannerView() {
     }
   }, [currentWorkId, aiParsed, aiPremise, outlineTree.length, reloadCurrentTab, showToast]);
 
+  // ==========================================================================
+  // AI 角色 / 场景生成
+  // ==========================================================================
+
+  /** 生成角色或场景（按 aiGenKind 分派），流式接收后解析为预览列表 */
+  const handleAiGenGenerate = useCallback(async () => {
+    if (!currentWorkId || !aiGenKind) return;
+    if (!aiGenPremise.trim()) {
+      showToast('请先输入作品创意或背景', 'warning');
+      return;
+    }
+
+    setAiGenRunning(true);
+    setAiGenOutput('');
+    setAiGenParsed([]);
+
+    let accumulated = '';
+    try {
+      const { loadConfig } = await import('../services/configService');
+      const config = (await loadConfig()).ai;
+      if (!config.baseUrl || !config.model) {
+        showToast('请先在设置中配置 AI 服务', 'warning');
+        setAiGenRunning(false);
+        return;
+      }
+      const work = works.find((w) => w.id === currentWorkId);
+      const messages =
+        aiGenKind === 'characters'
+          ? buildCharacterMessages(work?.title || '未命名作品', aiGenPremise.trim(), aiGenCount)
+          : buildSceneMessages(work?.title || '未命名作品', aiGenPremise.trim(), aiGenCount);
+
+      await new Promise<string>((resolve, reject) => {
+        aiChatStream(config, messages, {
+          onDelta: (delta) => {
+            accumulated += delta;
+            setAiGenOutput(accumulated);
+          },
+          onError: (message) => reject(new Error(message)),
+        }).then(resolve).catch(reject);
+      });
+
+      const parsed = aiGenKind === 'characters' ? parseCharacterJson(accumulated) : parseSceneJson(accumulated);
+      setAiGenParsed(parsed);
+      showToast(parsed.length > 0 ? '解析出 ' + parsed.length + ' 条结果' : '未能解析出结果，请重试', parsed.length > 0 ? 'success' : 'warning');
+    } catch (error: any) {
+      showToast(error.message || 'AI 请求失败', 'error');
+    } finally {
+      setAiGenRunning(false);
+      aiGenRequestRef.current = null;
+    }
+  }, [currentWorkId, aiGenKind, aiGenPremise, aiGenCount, works, showToast]);
+
+  /** 应用解析结果：批量创建角色或场景 */
+  const handleAiGenApply = useCallback(async () => {
+    if (!currentWorkId || aiGenParsed.length === 0) return;
+    setAiGenApplying(true);
+    try {
+      if (aiGenKind === 'characters') {
+        for (const c of aiGenParsed as ParsedCharacter[]) {
+          await createCharacter({
+            work_id: currentWorkId,
+            name: c.name,
+            description: c.description,
+            avatar: c.avatar,
+            personality: c.personality,
+            relationships: c.relationships,
+          });
+        }
+      } else {
+        for (const s of aiGenParsed as ParsedScene[]) {
+          await createScene({
+            work_id: currentWorkId,
+            name: s.name,
+            description: s.description,
+            location: s.location,
+            time_of_day: s.time_of_day,
+            mood: s.mood,
+          });
+        }
+      }
+      showToast('已创建 ' + aiGenParsed.length + ' 条' + (aiGenKind === 'characters' ? '角色' : '场景'), 'success');
+      setAiGenKind(null);
+      setAiGenParsed([]);
+      setAiGenOutput('');
+      await reloadCurrentTab();
+    } catch (error: any) {
+      showToast(error.message || '应用失败', 'error');
+    } finally {
+      setAiGenApplying(false);
+    }
+  }, [currentWorkId, aiGenParsed, aiGenKind, reloadCurrentTab, showToast]);
+
   /** 里程碑状态快捷切换（点击徽章循环：待办 → 进行中 → 已完成） */  const handleCycleMilestoneStatus = useCallback(async (milestone: Milestone) => {
     const nextStatus =
       milestone.status === 'pending' ? 'in_progress' : milestone.status === 'in_progress' ? 'completed' : 'pending';
@@ -704,6 +814,26 @@ export default function PlannerView() {
               ✨ AI 大纲
             </button>
           )}
+          {currentTab === 'characters' && (
+            <button
+              onClick={() => setAiGenKind('characters')}
+              disabled={!currentWorkId || loading}
+              className="px-4 py-2 border border-primary-400 text-primary-600 rounded-lg text-sm font-medium hover:bg-primary-50 transition-colors disabled:opacity-50"
+              title="从作品创意批量生成角色"
+            >
+              ✨ AI 角色
+            </button>
+          )}
+          {currentTab === 'scenes' && (
+            <button
+              onClick={() => setAiGenKind('scenes')}
+              disabled={!currentWorkId || loading}
+              className="px-4 py-2 border border-primary-400 text-primary-600 rounded-lg text-sm font-medium hover:bg-primary-50 transition-colors disabled:opacity-50"
+              title="从作品创意批量生成场景"
+            >
+              ✨ AI 场景
+            </button>
+          )}
           <button
             onClick={handleQuickCreate}
             disabled={loading || !currentWorkId}
@@ -813,8 +943,28 @@ export default function PlannerView() {
         <EditDialog
           item={editingItem.item}
           type={editingItem.type}
+          characters={characters}
+          settings={worldSettings}
           onSave={handleSaveEdit}
           onCancel={() => setEditingItem(null)}
+        />
+      )}
+
+      {/* AI 角色/场景生成对话框 */}
+      {aiGenKind && (
+        <AiGenDialog
+          kind={aiGenKind}
+          premise={aiGenPremise}
+          setPremise={setAiGenPremise}
+          count={aiGenCount}
+          setCount={setAiGenCount}
+          output={aiGenOutput}
+          running={aiGenRunning}
+          parsed={aiGenParsed}
+          applying={aiGenApplying}
+          onGenerate={handleAiGenGenerate}
+          onApply={handleAiGenApply}
+          onClose={() => setAiGenKind(null)}
         />
       )}
 
@@ -846,11 +996,15 @@ export default function PlannerView() {
 function EditDialog({
   item,
   type,
+  characters,
+  settings,
   onSave,
   onCancel,
 }: {
   item: OutlineNode | Character | Scene | Milestone | WorldSetting;
   type: Tab;
+  characters: Character[];
+  settings: WorldSetting[];
   onSave: (item: OutlineNode | Character | Scene | Milestone | WorldSetting) => void;
   onCancel: () => void;
 }) {
@@ -912,6 +1066,8 @@ function EditDialog({
             {type === 'worldSettings' && (
               <WorldSettingForm
                 setting={editedItem as WorldSetting}
+                characters={characters}
+                settings={settings}
                 onChange={(updated) => setEditedItem(updated)}
               />
             )}
@@ -1752,12 +1908,38 @@ function WorldSettingsView({
 // 世界观设定编辑表单
 function WorldSettingForm({
   setting,
+  characters,
+  settings,
   onChange,
 }: {
   setting: WorldSetting;
+  characters: Character[];
+  settings: WorldSetting[];
   onChange: (setting: WorldSetting) => void;
 }) {
   const categories: WorldSettingCategory[] = ['location', 'organization', 'event', 'culture', 'technology', 'magic'];
+
+  /** 切换关联角色（按名字） */
+  const toggleRelatedCharacter = (name: string) => {
+    const current = setting.related_characters || [];
+    onChange({
+      ...setting,
+      related_characters: current.includes(name)
+        ? current.filter((n) => n !== name)
+        : [...current, name],
+    });
+  };
+
+  /** 切换关联设定（按 ID，排除自身） */
+  const toggleRelatedSetting = (id: string) => {
+    const current = setting.related_settings || [];
+    onChange({
+      ...setting,
+      related_settings: current.includes(id)
+        ? current.filter((x) => x !== id)
+        : [...current, id],
+    });
+  };
 
   return (
     <>
@@ -1820,6 +2002,64 @@ function WorldSettingForm({
           placeholder="例如: 现代, 商业, 地标"
         />
       </div>
+
+      {/* 关联角色 */}
+      {characters.length > 0 && (
+        <div>
+          <label className="block text-sm font-medium text-on-surface-variant mb-2">
+            关联角色{setting.related_characters && setting.related_characters.length > 0 && `（已选 ${setting.related_characters.length}）`}
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {characters.map((c) => {
+              const active = (setting.related_characters || []).includes(c.name);
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => toggleRelatedCharacter(c.name)}
+                  className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${
+                    active
+                      ? 'bg-primary-100 border-primary-400 text-primary-700 dark:bg-primary-900 dark:text-primary-300'
+                      : 'bg-surface-secondary border-outline text-on-surface-secondary hover:bg-surface-tertiary'
+                  }`}
+                >
+                  {c.avatar || '👤'} {c.name}{active ? ' ✓' : ''}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 关联设定 */}
+      {settings.filter((s) => s.id !== setting.id).length > 0 && (
+        <div>
+          <label className="block text-sm font-medium text-on-surface-variant mb-2">
+            关联设定{setting.related_settings && setting.related_settings.length > 0 && `（已选 ${setting.related_settings.length}）`}
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {settings
+              .filter((s) => s.id !== setting.id)
+              .map((s) => {
+                const active = (setting.related_settings || []).includes(s.id);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => toggleRelatedSetting(s.id)}
+                    className={`px-2.5 py-1 rounded-lg text-xs border transition-colors ${
+                      active
+                        ? 'bg-primary-100 border-primary-400 text-primary-700 dark:bg-primary-900 dark:text-primary-300'
+                        : 'bg-surface-secondary border-outline text-on-surface-secondary hover:bg-surface-tertiary'
+                    }`}
+                  >
+                    {s.icon_type || CATEGORY_ICONS[s.category].icon} {s.title}{active ? ' ✓' : ''}
+                  </button>
+                );
+              })}
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -1962,6 +2202,144 @@ function AiOutlineDialog({
                 </button>
               )}
             </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// AI 角色/场景生成对话框（双模式复用）
+function AiGenDialog({
+  kind,
+  premise,
+  setPremise,
+  count,
+  setCount,
+  output,
+  running,
+  parsed,
+  applying,
+  onGenerate,
+  onApply,
+  onClose,
+}: {
+  kind: 'characters' | 'scenes';
+  premise: string;
+  setPremise: (v: string) => void;
+  count: number;
+  setCount: (v: number) => void;
+  output: string;
+  running: boolean;
+  parsed: ParsedCharacter[] | ParsedScene[];
+  applying: boolean;
+  onGenerate: () => void;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  const isCharacters = kind === 'characters';
+  const label = isCharacters ? '角色' : '场景';
+  const placeholder = isCharacters
+    ? '例如：返乡青年顾川在废弃车站发现一张十年前的车票，牵出被掩盖的事故真相'
+    : '例如：南方小城临江，废弃火车站、老宅阁楼与雨夜街道构成故事舞台';
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+      <div className="bg-surface-primary rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[85vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-outline flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-on-surface">✨ AI 生成{label}</h3>
+          <button onClick={onClose} className="text-on-surface-secondary hover:text-on-surface">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-4 space-y-4 flex-1 overflow-y-auto">
+          <div>
+            <label className="block text-sm font-medium text-on-surface-variant mb-2">作品创意 / 背景</label>
+            <textarea
+              value={premise}
+              onChange={(e) => setPremise(e.target.value)}
+              disabled={running}
+              className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[70px]"
+              placeholder={placeholder}
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-on-surface-variant">数量</label>
+            <select
+              value={count}
+              onChange={(e) => setCount(parseInt(e.target.value))}
+              disabled={running}
+              className="px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              {[3, 5, 6, 8, 10].map((n) => (
+                <option key={n} value={n}>{n} 个</option>
+              ))}
+            </select>
+          </div>
+
+          {running && (
+            <div className="p-3 bg-surface-secondary rounded-lg border border-outline text-xs text-on-surface-secondary whitespace-pre-wrap max-h-32 overflow-y-auto">
+              {output.slice(-300)}
+              <span className="animate-pulse">▍</span>
+            </div>
+          )}
+
+          {!running && parsed.length > 0 && (
+            <div>
+              <div className="text-sm font-medium text-on-surface mb-2">解析出 {parsed.length} 条{label}</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-64 overflow-y-auto">
+                {isCharacters
+                  ? (parsed as ParsedCharacter[]).map((c, i) => (
+                      <div key={i} className="p-2.5 bg-surface-secondary rounded-lg border border-outline">
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg">{c.avatar || '👤'}</span>
+                          <span className="text-sm font-medium text-on-surface">{c.name}</span>
+                        </div>
+                        {c.description && <p className="text-xs text-on-surface-secondary line-clamp-2 mt-1">{c.description}</p>}
+                      </div>
+                    ))
+                  : (parsed as ParsedScene[]).map((s, i) => (
+                      <div key={i} className="p-2.5 bg-surface-secondary rounded-lg border border-outline">
+                        <span className="text-sm font-medium text-on-surface">🎬 {s.name}</span>
+                        <p className="text-xs text-on-surface-secondary line-clamp-2 mt-1">{s.description}</p>
+                      </div>
+                    ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-outline flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-on-surface-variant hover:bg-surface-secondary transition-colors"
+          >
+            关闭
+          </button>
+          {running ? (
+            <span className="px-4 py-2 text-sm text-on-surface-secondary">生成中…</span>
+          ) : parsed.length > 0 ? (
+            <button
+              type="button"
+              onClick={onApply}
+              disabled={applying}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50"
+            >
+              {applying ? '创建中…' : '全部创建'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onGenerate}
+              disabled={!premise.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50"
+            >
+              生成
+            </button>
           )}
         </div>
       </div>

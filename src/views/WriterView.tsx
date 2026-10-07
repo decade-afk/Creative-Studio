@@ -47,6 +47,7 @@ import WriterEditor from '../components/WriterEditor';
 import WriterTopBar from '../components/WriterTopBar';
 import AiAssistantPanel from '../components/AiAssistantPanel';
 import StoryboardPanel from '../components/StoryboardPanel';
+import FindReplacePanel from '../components/FindReplacePanel';
 import VersionsDialog from '../components/VersionsDialog';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -136,6 +137,14 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
   useEffect(() => {
     if (showExportDialog) setExportScope('work');
   }, [showExportDialog]);
+
+  // 查找替换面板（Ctrl+H / 菜单触发）
+  const [showFindReplace, setShowFindReplace] = useState(false);
+  useEffect(() => {
+    const handler = () => setShowFindReplace((prev) => !prev);
+    window.addEventListener('creative-studio:replace', handler);
+    return () => window.removeEventListener('creative-studio:replace', handler);
+  }, []);
   
   /**
      * 计算字数
@@ -634,6 +643,11 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
               editorRef={editorRef}
               onClose={() => setShowAiPanel(false)}
             />
+          )}
+
+          {/* 查找替换面板 */}
+          {showFindReplace && (
+            <FindReplacePanel editorRef={editorRef} onClose={() => setShowFindReplace(false)} />
           )}
 
           {/* AI 分镜抽屉 */}

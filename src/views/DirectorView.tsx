@@ -78,6 +78,13 @@ import {
   formatFileSize,
 } from '../services/fileStorageService';
 import { getWorks } from '../services/workService';
+import {
+  aiChatStream,
+  buildClueDetectionMessages,
+  parseClueJson,
+  type ParsedClue,
+} from '../services/aiService';
+import { useRef } from 'react';
 import { useWriterStore } from '../stores/writerStore';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -106,6 +113,14 @@ export default function DirectorView() {
   // UI 状态
   const [editingItem, setEditingItem] = useState<EditingItem>(null);
   const [deletingItem, setDeletingItem] = useState<{ id: string; title: string } | null>(null);
+
+  // 伏笔 AI 检测
+  const [aiClueOpen, setAiClueOpen] = useState(false);
+  const [aiClueRunning, setAiClueRunning] = useState(false);
+  const [aiClueOutput, setAiClueOutput] = useState('');
+  const [aiClueParsed, setAiClueParsed] = useState<ParsedClue[]>([]);
+  const [aiClueApplying, setAiClueApplying] = useState(false);
+  const aiClueRequestRef = useRef<string | null>(null);
   const { showToast, ToastComponent } = useToast();
 
   // 与全局当前作品保持一致
@@ -397,6 +412,86 @@ export default function DirectorView() {
     }
   }, [currentWorkId, loading, reloadCurrentTab, showToast]);
 
+  // ==========================================================================
+  // 伏笔 AI 检测
+  // ==========================================================================
+
+  /** 读取全部章节正文，AI 检测伏笔与未回收悬念 */
+  const handleClueDetect = useCallback(async () => {
+    if (!currentWorkId || aiClueRunning) return;
+
+    setAiClueRunning(true);
+    setAiClueOutput('');
+    setAiClueParsed([]);
+
+    let accumulated = '';
+    try {
+      const { loadConfig } = await import('../services/configService');
+      const config = (await loadConfig()).ai;
+      if (!config.baseUrl || !config.model) {
+        showToast('请先在设置中配置 AI 服务', 'warning');
+        setAiClueRunning(false);
+        return;
+      }
+
+      // 取全部章节作为检测素材
+      const chapters = await getChaptersByWorkId(currentWorkId);
+      if (chapters.length === 0) {
+        showToast('作品还没有章节内容，先在创作视图写一些正文', 'info');
+        setAiClueRunning(false);
+        return;
+      }
+
+      await new Promise<string>((resolve, reject) => {
+        aiChatStream(config, buildClueDetectionMessages(
+          chapters.map((c) => ({ title: c.title, content: c.content }))
+        ), {
+          onDelta: (delta) => {
+            accumulated += delta;
+            setAiClueOutput(accumulated);
+          },
+          onError: (message) => reject(new Error(message)),
+        }).then(resolve).catch(reject);
+      });
+
+      const parsed = parseClueJson(accumulated);
+      setAiClueParsed(parsed);
+      showToast(parsed.length > 0 ? '检测到 ' + parsed.length + ' 条伏笔' : 'AI 认为正文中暂无明显伏笔', parsed.length > 0 ? 'success' : 'info');
+    } catch (error: any) {
+      showToast(error.message || 'AI 请求失败', 'error');
+    } finally {
+      setAiClueRunning(false);
+      aiClueRequestRef.current = null;
+    }
+  }, [currentWorkId, aiClueRunning, showToast]);
+
+  /** 将检测出的伏笔入库（来源标记为 AI） */
+  const handleClueApply = useCallback(async () => {
+    if (!currentWorkId || aiClueParsed.length === 0) return;
+    setAiClueApplying(true);
+    try {
+      for (const c of aiClueParsed) {
+        await createClue({
+          work_id: currentWorkId,
+          name: c.name,
+          source: 'ai_detected',
+          status: 'open',
+          setup_scene_id: null,
+          payoff_scene_id: null,
+          description: c.description,
+        });
+      }
+      showToast('已添加 ' + aiClueParsed.length + ' 条伏笔', 'success');
+      setAiClueOpen(false);
+      setAiClueParsed([]);
+      await reloadCurrentTab();
+    } catch (error: any) {
+      showToast(error.message || '添加失败', 'error');
+    } finally {
+      setAiClueApplying(false);
+    }
+  }, [currentWorkId, aiClueParsed, reloadCurrentTab, showToast]);
+
   /** 在系统文件管理器中显示素材文件 */
   const handleRevealAsset = useCallback(async (asset: Asset) => {
     try {
@@ -505,6 +600,16 @@ export default function DirectorView() {
         </div>
 
         <div className="flex items-center gap-2">
+          {currentTab === 'clues' && (
+            <button
+              onClick={() => setAiClueOpen(true)}
+              disabled={loading || !currentWorkId}
+              className="px-4 py-2 border border-primary-400 text-primary-600 rounded-lg text-sm font-medium hover:bg-primary-50 transition-colors disabled:opacity-50"
+              title="AI 读取全部章节，自动发现伏笔与未回收悬念"
+            >
+              🤖 AI 检测伏笔
+            </button>
+          )}
           {currentTab === 'assets' && (
             <button
               onClick={handleBatchImport}
@@ -590,6 +695,19 @@ export default function DirectorView() {
           </div>
         )}
       </div>
+
+      {/* 伏笔 AI 检测对话框 */}
+      {aiClueOpen && (
+        <AiClueDetectDialog
+          running={aiClueRunning}
+          output={aiClueOutput}
+          parsed={aiClueParsed}
+          applying={aiClueApplying}
+          onDetect={handleClueDetect}
+          onApply={handleClueApply}
+          onClose={() => setAiClueOpen(false)}
+        />
+      )}
 
       {/* 编辑对话框 */}
       {editingItem && (
@@ -1290,6 +1408,103 @@ function AssetsView({
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+// 伏笔 AI 检测对话框
+function AiClueDetectDialog({
+  running,
+  output,
+  parsed,
+  applying,
+  onDetect,
+  onApply,
+  onClose,
+}: {
+  running: boolean;
+  output: string;
+  parsed: ParsedClue[];
+  applying: boolean;
+  onDetect: () => void;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+      <div className="bg-surface-primary rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[85vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-outline flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-on-surface">🤖 AI 检测伏笔</h3>
+          <button onClick={onClose} className="text-on-surface-secondary hover:text-on-surface">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-4 space-y-4 flex-1 overflow-y-auto">
+          <p className="text-sm text-on-surface-secondary">
+            AI 将通读作品的全部章节，找出确实埋设在正文中的伏笔与未回收悬念。检测到的伏笔来源会标记为「AI检测」，可在列表中进一步关联铺设与回收场景。
+          </p>
+
+          {running && (
+            <div className="p-3 bg-surface-secondary rounded-lg border border-outline text-xs text-on-surface-secondary whitespace-pre-wrap max-h-40 overflow-y-auto">
+              {output.slice(-400)}
+              <span className="animate-pulse">▍</span>
+            </div>
+          )}
+
+          {!running && parsed.length > 0 && (
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              <div className="text-sm font-medium text-on-surface">检测到 {parsed.length} 条伏笔</div>
+              {parsed.map((clue, i) => (
+                <div key={i} className="p-3 bg-surface-secondary rounded-lg border border-outline">
+                  <div className="text-sm font-medium text-on-surface">🔗 {clue.name}</div>
+                  {clue.description && (
+                    <p className="text-xs text-on-surface-secondary mt-1 line-clamp-3">{clue.description}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!running && parsed.length === 0 && output && (
+            <p className="text-sm text-on-surface-secondary p-3 bg-surface-secondary rounded-lg border border-outline">
+              未检测到明显伏笔（或解析失败），可重新检测。
+            </p>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-outline flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-on-surface-variant hover:bg-surface-secondary transition-colors"
+          >
+            {parsed.length > 0 ? '取消' : '关闭'}
+          </button>
+          {running ? (
+            <span className="px-4 py-2 text-sm text-on-surface-secondary">检测中…</span>
+          ) : parsed.length > 0 ? (
+            <button
+              type="button"
+              onClick={onApply}
+              disabled={applying}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50"
+            >
+              {applying ? '添加中…' : `添加全部（${parsed.length} 条）`}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onDetect}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-500 text-white hover:bg-primary-600 transition-colors"
+            >
+              {output ? '重新检测' : '开始检测'}
+            </button>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

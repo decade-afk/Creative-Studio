@@ -32,6 +32,7 @@ interface AppMenuProps {
   onSettings?: () => void;
   onToggleSidebar?: () => void;
   onSearch?: () => void;
+  onReplace?: () => void;
   onToggleAiPanel?: () => void;
 }
 
@@ -43,6 +44,7 @@ export default function AppMenu({
   onSettings,
   onToggleSidebar,
   onSearch,
+  onReplace,
   onToggleAiPanel
 }: AppMenuProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -123,7 +125,7 @@ export default function AppMenu({
         {
           label: '查找替换',
           shortcut: formatShortcut(ShortcutPresets.replace(() => {})),
-          disabled: true
+          onClick: onReplace
         },
       ],
     },

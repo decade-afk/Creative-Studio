@@ -24,6 +24,21 @@ const CONTINUE_REPLY = [
   '“开往临江的列车即将进站，请旅客们注意安全。”',
 ];
 
+const CHARACTER_JSON = JSON.stringify([
+  { name: '顾川', avatar: '🧑', description: '返乡青年，背负十年心结', personality: '内敛、执拗、重情', relationships: '老周的忘年交，母亲之子' },
+  { name: '站长老周', avatar: '👴', description: '守站三十年，知晓事故真相', personality: '沉默寡言、心怀愧疚', relationships: '隐瞒真相的关键人物' },
+]);
+
+const SCENE_JSON = JSON.stringify([
+  { name: '废弃车站月台', location: '临江站', time_of_day: 'night', mood: '萧瑟', description: '雨夜空镜，锈迹斑斑的站牌在风中作响' },
+  { name: '老宅阁楼', location: '临江镇', time_of_day: 'evening', mood: '压抑', description: '尘封遗物与泛黄信件，光从瓦缝漏下' },
+]);
+
+const CLUE_JSON = JSON.stringify([
+  { name: '生锈的车票', description: '票根背面的日期与事故当日吻合' },
+  { name: '老周的提灯', description: '每次提到夜车就会提灯照向铁轨尽头' },
+]);
+
 const STORYBOARD_JSON = JSON.stringify([
   { title: '月台全景', description: '雨夜空镜，霓虹灯牌闪烁', shot_type: 'wide', camera_movement: 'crane', duration: 8 },
   { title: '脚步特写', description: '皮鞋踏过积水', shot_type: 'close', camera_movement: 'dolly', duration: 4 },
@@ -45,6 +60,9 @@ function pickReply(body) {
     const text = JSON.stringify(parsed);
     if (text.includes('分镜')) return STORYBOARD_JSON;
     if (text.includes('大纲')) return OUTLINE_TEXT;
+    if (text.includes('伏笔')) return CLUE_JSON;
+    if (text.includes('角色')) return CHARACTER_JSON;
+    if (text.includes('场景')) return SCENE_JSON;
   } catch {
     // 忽略解析失败
   }

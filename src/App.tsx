@@ -417,6 +417,10 @@ function App() {
     ShortcutPresets.settings(() => setShowSettings(true)),
     ShortcutPresets.toggleSidebar(handleToggleSidebar),
     ShortcutPresets.find(() => setShowSearch(true)),
+    ShortcutPresets.replace(() => {
+      setCurrentView('writer');
+      window.dispatchEvent(new CustomEvent('creative-studio:replace'));
+    }),
     ShortcutPresets.save(() => {
       // 触发 WriterView 的立即保存（监听 window 事件）
       window.dispatchEvent(new CustomEvent('creative-studio:save'));
@@ -479,6 +483,10 @@ function App() {
         onSettings={() => setShowSettings(true)}
         onToggleSidebar={handleToggleSidebar}
         onSearch={() => setShowSearch(true)}
+        onReplace={() => {
+          setCurrentView('writer');
+          window.dispatchEvent(new CustomEvent('creative-studio:replace'));
+        }}
         onToggleAiPanel={handleToggleAiPanel}
       />
 

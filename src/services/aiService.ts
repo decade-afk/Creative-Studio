@@ -486,5 +486,167 @@ export interface ParsedOutlineChapter {
   description: string;
 }
 
+// ============================================================================
+// 角色生成
+// ============================================================================
+
+/** AI 生成角色提示词 */
+export function buildCharacterMessages(workTitle: string, premise: string, count: number): AiMessage[] {
+  return [
+    {
+      role: 'system',
+      content: `你是专业的小说人物架构师。只输出一个 JSON 数组，不要任何解释或代码块标记。
+每个角色格式：
+{"name":"角色名","avatar":"一个贴合角色的emoji","description":"80字以内的人物简介","personality":"性格特点","relationships":"与其他角色的关系"}
+生成 ${count} 个立体、有张力的角色，关系之间要能形成戏剧冲突。`,
+    },
+    {
+      role: 'user',
+      content: `为作品《${workTitle}》设计角色。作品创意：${premise}`,
+    },
+  ];
+}
+
+/** 解析出的角色 */
+export interface ParsedCharacter {
+  name: string;
+  avatar: string;
+  description: string;
+  personality: string;
+  relationships: string;
+}
+
+/** 解析 AI 输出中的角色 JSON 数组（容忍代码块包裹，剔除非法字段） */
+export function parseCharacterJson(text: string): ParsedCharacter[] {
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start === -1 || end <= start) return [];
+  let parsed: any[];
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((item) => item && typeof item === 'object' && item.name)
+    .map((item) => ({
+      name: String(item.name).slice(0, 50),
+      avatar: String(item.avatar || '').slice(0, 4),
+      description: String(item.description || ''),
+      personality: String(item.personality || ''),
+      relationships: String(item.relationships || ''),
+    }));
+}
+
+// ============================================================================
+// 场景生成
+// ============================================================================
+
+/** AI 生成场景提示词 */
+export function buildSceneMessages(workTitle: string, premise: string, count: number): AiMessage[] {
+  return [
+    {
+      role: 'system',
+      content: `你是专业的美术指导。只输出一个 JSON 数组，不要任何解释或代码块标记。
+每个场景格式：
+{"name":"场景名","location":"具体地点","time_of_day":"morning|noon|evening|night|other","mood":"氛围关键词","description":"80字以内的画面描述"}
+生成 ${count} 个有画面感的场景，time_of_day 只能取给定枚举值。`,
+    },
+    {
+      role: 'user',
+      content: `为作品《${workTitle}》设计场景。作品创意：${premise}`,
+    },
+  ];
+}
+
+/** 解析出的场景 */
+export interface ParsedScene {
+  name: string;
+  location: string;
+  time_of_day: 'morning' | 'noon' | 'evening' | 'night' | 'other';
+  mood: string;
+  description: string;
+}
+
+const TIME_OF_DAY = new Set(['morning', 'noon', 'evening', 'night', 'other']);
+
+/** 解析 AI 输出中的场景 JSON 数组 */
+export function parseSceneJson(text: string): ParsedScene[] {
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start === -1 || end <= start) return [];
+  let parsed: any[];
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((item) => item && typeof item === 'object' && item.name)
+    .map((item) => ({
+      name: String(item.name).slice(0, 80),
+      location: String(item.location || ''),
+      time_of_day: (TIME_OF_DAY.has(item.time_of_day) ? item.time_of_day : 'other') as ParsedScene['time_of_day'],
+      mood: String(item.mood || ''),
+      description: String(item.description || ''),
+    }));
+}
+
+// ============================================================================
+// 伏笔 AI 检测
+// ============================================================================
+
+/** 伏笔检测提示词：基于已有章节内容找出伏笔与未回收悬念 */
+export function buildClueDetectionMessages(
+  chapters: { title: string; content: string }[]
+): AiMessage[] {
+  const body = chapters
+    .map((c) => `【${c.title}】\n${htmlToPlainText(c.content).slice(0, 3000)}`)
+    .join('\n\n')
+    .slice(0, 12000);
+
+  return [
+    {
+      role: 'system',
+      content: `你是严谨的中文小说编辑，擅长从正文中发现伏笔与悬念。只输出一个 JSON 数组，不要任何解释或代码块标记。
+每条伏笔格式：
+{"name":"伏笔简称","description":"埋设位置与暗示的内容（引用原文关键短语）"}
+只列出确实存在于正文中的伏笔（3-8 条）；没有则输出空数组 []。`,
+    },
+    {
+      role: 'user',
+      content: `请从以下章节中检测伏笔与未回收悬念：\n\n${body}`,
+    },
+  ];
+}
+
+/** 解析出的伏笔 */
+export interface ParsedClue {
+  name: string;
+  description: string;
+}
+
+/** 解析 AI 输出中的伏笔 JSON 数组（空数组是合法结果） */
+export function parseClueJson(text: string): ParsedClue[] {
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start === -1 || end <= start) return [];
+  let parsed: any[];
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed
+    .filter((item) => item && typeof item === 'object' && item.name)
+    .map((item) => ({
+      name: String(item.name).slice(0, 80),
+      description: String(item.description || ''),
+    }));
+}
+
 // 便于测试与调试导出
 export const __internals = { htmlToPlainText };

@@ -23,6 +23,7 @@ interface TitleBarProps {
   onSettings?: () => void;       // 设置回调
   onToggleSidebar?: () => void;  // 切换侧边栏回调
   onSearch?: () => void;         // 全局搜索回调
+  onReplace?: () => void;        // 查找替换回调
   onToggleAiPanel?: () => void;  // 切换 AI 助手面板回调
 }
 
@@ -35,6 +36,7 @@ export default function TitleBar({
   onSettings,
   onToggleSidebar,
   onSearch,
+  onReplace,
   onToggleAiPanel,
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -321,6 +323,7 @@ export default function TitleBar({
                 onSettings={onSettings}
                 onToggleSidebar={onToggleSidebar}
                 onSearch={onSearch}
+                onReplace={onReplace}
                 onToggleAiPanel={onToggleAiPanel}
               />
             </div>
@@ -392,6 +395,7 @@ export default function TitleBar({
                 onSettings={onSettings}
                 onToggleSidebar={onToggleSidebar}
                 onSearch={onSearch}
+                onReplace={onReplace}
                 onToggleAiPanel={onToggleAiPanel}
               />
             </div>
