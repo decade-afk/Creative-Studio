@@ -393,5 +393,98 @@ export function buildOutlineMessages(premise: string, chapterCount: number): AiM
   ];
 }
 
+/**
+ * 分镜生成：从章节正文生成分镜镜头列表
+ */
+export function buildStoryboardMessages(chapterTitle: string, chapterHtml: string): AiMessage[] {
+  return [
+    {
+      role: 'system',
+      content: `你是专业影视分镜师。只输出一个 JSON 数组，不要任何解释、代码块标记或其它文字。
+每个镜头格式：
+{"title":"镜头标题","description":"画面内容描述","shot_type":"wide|medium|close|extreme_close","camera_movement":"static|pan|tilt|zoom|dolly|crane","duration":秒数}
+要求：8-12 个镜头，覆盖章节关键节拍；shot_type 与 camera_movement 只能取给定枚举值；duration 为 2-15 的数字。`,
+    },
+    {
+      role: 'user',
+      content: `为章节「${chapterTitle}」设计分镜：\n\n${htmlToPlainText(chapterHtml).slice(0, 8000)}`,
+    },
+  ];
+}
+
+/**
+ * 解析 AI 输出中的分镜 JSON 数组
+ *
+ * 容忍 markdown 代码块包裹与前后杂文本；非法字段自动剔除
+ */
+export function parseStoryboardJson(text: string): ParsedStoryboard[] {
+  // 提取第一个 '[' 到最后一个 ']' 之间的内容
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start === -1 || end <= start) return [];
+
+  let parsed: any[];
+  try {
+    parsed = JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+
+  const SHOT_TYPES = new Set(['wide', 'medium', 'close', 'extreme_close']);
+  const MOVES = new Set(['static', 'pan', 'tilt', 'zoom', 'dolly', 'crane']);
+
+  return parsed
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => ({
+      title: String(item.title || '未命名镜头').slice(0, 100),
+      description: String(item.description || ''),
+      shot_type: SHOT_TYPES.has(item.shot_type) ? item.shot_type : 'medium',
+      camera_movement: MOVES.has(item.camera_movement) ? item.camera_movement : 'static',
+      duration: Math.max(1, Math.min(60, Math.round(Number(item.duration) || 5))),
+    }));
+}
+
+/** 解析出的单条分镜 */
+export interface ParsedStoryboard {
+  title: string;
+  description: string;
+  shot_type: 'wide' | 'medium' | 'close' | 'extreme_close';
+  camera_movement: 'static' | 'pan' | 'tilt' | 'zoom' | 'dolly' | 'crane';
+  duration: number;
+}
+
+/**
+ * 解析 AI 大纲文本为章节列表
+ *
+ * 识别"第N章 标题：梗概"（支持中文数字、全角冒号）
+ */
+export function parseOutlineText(text: string): ParsedOutlineChapter[] {
+  const result: ParsedOutlineChapter[] = [];
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+  // 第N章（阿拉伯或中文数字），后接标题，可选冒号 + 梗概
+  const pattern = /^第\s*([0-9一二三四五六七八九十百千零两]+)\s*章\s*[:：]?\s*(.*)$/;
+
+  for (const line of lines) {
+    const match = line.match(pattern);
+    if (!match) continue;
+
+    const rest = match[2];
+    const sepIndex = rest.search(/[：:]/);
+    const title = (sepIndex === -1 ? rest : rest.slice(0, sepIndex)).trim() || `第${match[1]}章`;
+    const description = sepIndex === -1 ? '' : rest.slice(sepIndex + 1).trim();
+
+    result.push({ title: title.slice(0, 100), description });
+  }
+
+  return result;
+}
+
+/** 解析出的大纲章节 */
+export interface ParsedOutlineChapter {
+  title: string;
+  description: string;
+}
+
 // 便于测试与调试导出
 export const __internals = { htmlToPlainText };

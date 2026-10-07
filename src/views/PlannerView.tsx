@@ -49,15 +49,23 @@
  * 4. useCallback 用于事件处理函数，优化性能
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import type { OutlineNode, Scene, Milestone, Character } from '../types/storage';
 import { getOutlineNodesByWorkId, createOutlineNode, updateOutlineNode, deleteOutlineNode } from '../services/outlineService';
 import { getScenesByWorkId, createScene, updateScene, deleteScene } from '../services/sceneService';
 import { getMilestonesByWorkId, createMilestone, updateMilestone, deleteMilestone } from '../services/milestoneService';
 import { getWorks } from '../services/workService';
+import { getChaptersByWorkId } from '../services/chapterService';
 import { getCharactersByWorkId, createCharacter, updateCharacter, deleteCharacter } from '../services/characterService';
 import { useWriterStore } from '../stores/writerStore';
 import type { Work } from '../types/storage';
+import {
+  aiChatStream,
+  aiCancel,
+  buildOutlineMessages,
+  parseOutlineText,
+  type ParsedOutlineChapter,
+} from '../services/aiService';
 import { 
   getWorldSettings, 
   createWorldSetting, 
@@ -96,6 +104,20 @@ export default function PlannerView() {
   const [editingItem, setEditingItem] = useState<EditingItem>(null);
   const [deletingItem, setDeletingItem] = useState<{ id: string; title: string; childCount: number } | null>(null);
   const { showToast, ToastComponent } = useToast();
+
+  // 概览统计
+  const [chapterCount, setChapterCount] = useState(0);
+  const [totalWords, setTotalWords] = useState<number | null>(null);
+
+  // AI 大纲生成
+  const [aiOutlineOpen, setAiOutlineOpen] = useState(false);
+  const [aiPremise, setAiPremise] = useState('');
+  const [aiChapterCount, setAiChapterCount] = useState(10);
+  const [aiOutput, setAiOutput] = useState('');
+  const [aiRunning, setAiRunning] = useState(false);
+  const [aiParsed, setAiParsed] = useState<ParsedOutlineChapter[]>([]);
+  const [aiApplying, setAiApplying] = useState(false);
+  const aiRequestRef = useRef<string | null>(null);
 
   // 与全局当前作品保持一致（创作视图切换作品后这里自动跟随）
   useEffect(() => {
@@ -143,6 +165,18 @@ export default function PlannerView() {
       setScenes(scns);
       setMilestones(mls);
       setWorldSettings(ws);
+
+      // 概览统计：章节数与总字数
+      getChaptersByWorkId(currentWorkId)
+        .then((chs) => {
+          setChapterCount(chs.length);
+          const words = chs.reduce(
+            (sum, c) => sum + (c.content.replace(/<[^>]*>/g, '').replace(/\s/g, '').length),
+            0
+          );
+          setTotalWords(words);
+        })
+        .catch(() => undefined);
     } catch (error) {
       showToast('加载数据失败', 'error');
       console.error('加载失败:', error);
@@ -152,8 +186,7 @@ export default function PlannerView() {
   }, [currentWorkId, showToast]);
 
   // 性能优化：只重新加载当前tab的数据
-  const reloadCurrentTab = useCallback(async () => {
-    if (!currentWorkId) return;
+  const reloadCurrentTab = useCallback(async () => {    if (!currentWorkId) return;
 
     setLoading(true);
     try {
@@ -420,8 +453,104 @@ export default function PlannerView() {
     }
   }, [outlineTree, reloadCurrentTab, showToast]);
 
-  /** 里程碑状态快捷切换（点击徽章循环：待办 → 进行中 → 已完成） */
-  const handleCycleMilestoneStatus = useCallback(async (milestone: Milestone) => {
+  // ==========================================================================
+  // AI 大纲生成
+  // ==========================================================================
+
+  /** 流式生成大纲并解析为章节列表 */
+  const handleAiGenerateOutline = useCallback(async () => {
+    if (!currentWorkId) return;
+    if (!aiPremise.trim()) {
+      showToast('请先输入一句话创意', 'warning');
+      return;
+    }
+
+    setAiRunning(true);
+    setAiOutput('');
+    setAiParsed([]);
+
+    let accumulated = '';
+    try {
+      const { loadConfig } = await import('../services/configService');
+      const config = (await loadConfig()).ai;
+      if (!config.baseUrl || !config.model) {
+        showToast('请先在设置中配置 AI 服务', 'warning');
+        setAiRunning(false);
+        return;
+      }
+      await new Promise<string>((resolve, reject) => {
+        aiChatStream(config, buildOutlineMessages(aiPremise.trim(), aiChapterCount), {
+          onDelta: (delta) => {
+            accumulated += delta;
+            setAiOutput(accumulated);
+          },
+          onError: (message) => reject(new Error(message)),
+        }).then(resolve).catch(reject);
+      });
+      const parsed = parseOutlineText(accumulated);
+      setAiParsed(parsed);
+      if (parsed.length === 0) {
+        showToast('未能从 AI 输出中解析出章节大纲，请重试', 'warning');
+      } else {
+        showToast('解析出 ' + parsed.length + ' 章大纲', 'success');
+      }
+    } catch (error: any) {
+      const parsed = parseOutlineText(accumulated);
+      setAiParsed(parsed);
+      if (parsed.length === 0) {
+        showToast(error.message || 'AI 请求失败', 'error');
+      }
+    } finally {
+      setAiRunning(false);
+      aiRequestRef.current = null;
+    }
+  }, [currentWorkId, aiPremise, aiChapterCount, showToast]);
+
+  /** 停止生成 */
+  const handleAiStop = useCallback(() => {
+    if (aiRequestRef.current) {
+      aiCancel(aiRequestRef.current);
+    }
+    setAiRunning(false);
+  }, []);
+
+  /** 将解析结果应用为大纲树（一个幕 + N 个场景节点） */
+  const handleAiApply = useCallback(async () => {
+    if (!currentWorkId || aiParsed.length === 0) return;
+    setAiApplying(true);
+    try {
+      const act = await createOutlineNode({
+        work_id: currentWorkId,
+        parent_id: null,
+        title: 'AI 大纲：' + aiPremise.trim().slice(0, 20),
+        description: aiPremise.trim(),
+        order: outlineTree.length,
+        type: 'act',
+      });
+      for (let i = 0; i < aiParsed.length; i++) {
+        await createOutlineNode({
+          work_id: currentWorkId,
+          parent_id: act.id,
+          title: '第' + (i + 1) + '章 ' + aiParsed[i].title,
+          description: aiParsed[i].description,
+          order: i,
+          type: 'scene',
+        });
+      }
+      showToast('已创建 1 幕 + ' + aiParsed.length + ' 个章节节点', 'success');
+      setAiOutlineOpen(false);
+      setAiParsed([]);
+      setAiOutput('');
+      setAiPremise('');
+      await reloadCurrentTab();
+    } catch (error: any) {
+      showToast(error.message || '应用失败', 'error');
+    } finally {
+      setAiApplying(false);
+    }
+  }, [currentWorkId, aiParsed, aiPremise, outlineTree.length, reloadCurrentTab, showToast]);
+
+  /** 里程碑状态快捷切换（点击徽章循环：待办 → 进行中 → 已完成） */  const handleCycleMilestoneStatus = useCallback(async (milestone: Milestone) => {
     const nextStatus =
       milestone.status === 'pending' ? 'in_progress' : milestone.status === 'in_progress' ? 'completed' : 'pending';
     try {
@@ -540,14 +669,38 @@ export default function PlannerView() {
           </div>
         </div>
 
-        <button
-          onClick={handleQuickCreate}
-          disabled={loading}
-          className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? '处理中...' : '+ 新建'}
-        </button>
+        <div className="flex items-center gap-2">
+          {currentTab === 'outline' && (
+            <button
+              onClick={() => setAiOutlineOpen(true)}
+              disabled={!currentWorkId || loading}
+              className="px-4 py-2 border border-primary-400 text-primary-600 rounded-lg text-sm font-medium hover:bg-primary-50 transition-colors disabled:opacity-50"
+              title="从一句话创意生成章节大纲"
+            >
+              ✨ AI 大纲
+            </button>
+          )}
+          <button
+            onClick={handleQuickCreate}
+            disabled={loading || !currentWorkId}
+            className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? '处理中...' : '+ 新建'}
+          </button>
+        </div>
       </div>
+
+      {/* 概览统计条 */}
+      {currentWorkId && (
+        <div className="flex items-center gap-5 px-6 py-2 text-xs text-on-surface-secondary border-b border-outline bg-surface-secondary">
+          <span>📋 大纲 {outlineNodes.length}</span>
+          <span>📖 章节 {chapterCount}</span>
+          {totalWords !== null && <span>✍️ 字数 {totalWords.toLocaleString()}</span>}
+          <span>👤 角色 {characters.length}</span>
+          <span>🎬 场景 {scenes.length}</span>
+          <span>🎯 里程碑 {milestones.filter((m) => m.status === 'completed').length}/{milestones.length}</span>
+        </div>
+      )}
 
       {/* 内容区域 */}
       <div className="flex-1 overflow-auto p-6">
@@ -637,6 +790,27 @@ export default function PlannerView() {
           type={editingItem.type}
           onSave={handleSaveEdit}
           onCancel={() => setEditingItem(null)}
+        />
+      )}
+
+      {/* AI 大纲生成对话框 */}
+      {aiOutlineOpen && (
+        <AiOutlineDialog
+          premise={aiPremise}
+          setPremise={setAiPremise}
+          chapterCount={aiChapterCount}
+          setChapterCount={setAiChapterCount}
+          output={aiOutput}
+          running={aiRunning}
+          parsed={aiParsed}
+          applying={aiApplying}
+          onGenerate={handleAiGenerateOutline}
+          onStop={handleAiStop}
+          onApply={handleAiApply}
+          onClose={() => {
+            if (aiRunning) handleAiStop();
+            setAiOutlineOpen(false);
+          }}
         />
       )}
     </div>
@@ -1619,5 +1793,150 @@ function WorldSettingForm({
         />
       </div>
     </>
+  );
+}
+
+// AI 大纲生成对话框
+function AiOutlineDialog({
+  premise,
+  setPremise,
+  chapterCount,
+  setChapterCount,
+  output,
+  running,
+  parsed,
+  applying,
+  onGenerate,
+  onStop,
+  onApply,
+  onClose,
+}: {
+  premise: string;
+  setPremise: (v: string) => void;
+  chapterCount: number;
+  setChapterCount: (v: number) => void;
+  output: string;
+  running: boolean;
+  parsed: ParsedOutlineChapter[];
+  applying: boolean;
+  onGenerate: () => void;
+  onStop: () => void;
+  onApply: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999]">
+      <div className="bg-surface-primary rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[85vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-outline flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-on-surface">✨ AI 生成大纲</h3>
+          <button onClick={onClose} className="text-on-surface-secondary hover:text-on-surface">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="px-6 py-4 space-y-4 flex-1 overflow-y-auto">
+          <div>
+            <label className="block text-sm font-medium text-on-surface-variant mb-2">一句话创意</label>
+            <textarea
+              value={premise}
+              onChange={(e) => setPremise(e.target.value)}
+              disabled={running}
+              className="w-full px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 min-h-[80px]"
+              placeholder="例如：返乡青年顾川在废弃车站发现一张十年前的车票，牵出一场被全镇掩盖的事故真相"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-on-surface-variant">章节数</label>
+            <select
+              value={chapterCount}
+              onChange={(e) => setChapterCount(parseInt(e.target.value))}
+              disabled={running}
+              className="px-3 py-2 border border-outline rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              {[5, 8, 10, 12, 15, 20, 30].map((n) => (
+                <option key={n} value={n}>{n} 章</option>
+              ))}
+            </select>
+          </div>
+
+          {(running || output) && (
+            <div>
+              <label className="block text-sm font-medium text-on-surface-variant mb-2">
+                {running ? '生成中…' : parsed.length > 0 ? `解析出 ${parsed.length} 章` : '输出'}
+              </label>
+              <div className="p-3 bg-surface-secondary rounded-lg border border-outline text-sm text-on-surface whitespace-pre-wrap max-h-48 overflow-y-auto leading-relaxed">
+                {running ? (
+                  <>
+                    {output.slice(-400)}
+                    <span className="animate-pulse">▍</span>
+                  </>
+                ) : (
+                  output || '（无输出）'
+                )}
+              </div>
+            </div>
+          )}
+
+          {!running && parsed.length > 0 && (
+            <div>
+              <label className="block text-sm font-medium text-on-surface-variant mb-2">章节预览</label>
+              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                {parsed.map((ch, i) => (
+                  <div key={i} className="p-2 bg-surface-secondary rounded border border-outline">
+                    <span className="text-sm font-medium text-on-surface">第{i + 1}章 {ch.title}</span>
+                    {ch.description && (
+                      <p className="text-xs text-on-surface-secondary line-clamp-2 mt-0.5">{ch.description}</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="px-6 py-4 border-t border-outline flex justify-end gap-3">
+          {running ? (
+            <button
+              type="button"
+              onClick={onStop}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-red-500 text-white hover:bg-red-600 transition-colors"
+            >
+              ■ 停止
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-4 py-2 rounded-lg text-sm font-medium text-on-surface-variant hover:bg-surface-secondary transition-colors"
+              >
+                {parsed.length > 0 ? '取消' : '关闭'}
+              </button>
+              {parsed.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={onApply}
+                  disabled={applying}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50"
+                >
+                  {applying ? '创建中…' : `应用到大纲（${parsed.length} 章）`}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onGenerate}
+                  disabled={!premise.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-primary-500 text-white hover:bg-primary-600 transition-colors disabled:opacity-50"
+                >
+                  生成
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

@@ -303,6 +303,52 @@ export async function importAssetWithDialog(
 }
 
 /**
+ * 通过对话框批量选择并导入资源（多选）
+ *
+ * 单个文件失败不中断整体导入，失败原因汇总返回
+ *
+ * @param workId 作品ID
+ * @returns Promise<{ imported: Asset[]; failed: string[] }> 导入结果
+ */
+export async function importAssetsWithDialog(
+  workId: string
+): Promise<{ imported: Asset[]; failed: string[] }> {
+  const selected = await open({
+    title: '批量导入素材',
+    multiple: true,
+    directory: false,
+    filters: [
+      {
+        name: '所有支持的文件',
+        extensions: Object.values(SUPPORTED_EXTENSIONS)
+          .flat()
+          .map((ext) => ext.substring(1)),
+      },
+      { name: '所有文件', extensions: ['*'] },
+    ],
+  });
+
+  if (!selected) {
+    return { imported: [], failed: [] };
+  }
+
+  const paths = Array.isArray(selected) ? selected : [selected];
+  const imported: Asset[] = [];
+  const failed: string[] = [];
+
+  for (const path of paths) {
+    try {
+      imported.push(await importAsset(workId, path));
+    } catch (error) {
+      console.error(`导入失败: ${path}`, error);
+      failed.push(`${path.split(/[\\/]/).pop()}（${error}）`);
+    }
+  }
+
+  return { imported, failed };
+}
+
+/**
  * 删除资源文件
  * 删除物理文件和数据库记录
  *

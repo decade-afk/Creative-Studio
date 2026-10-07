@@ -73,6 +73,7 @@ import { getScenesByWorkId } from '../services/sceneService';
 import { getChaptersByWorkId } from '../services/chapterService';
 import {
   importAssetWithDialog,
+  importAssetsWithDialog,
   removeAsset,
   formatFileSize,
 } from '../services/fileStorageService';
@@ -374,6 +375,28 @@ export default function DirectorView() {
     }
   }, [deletingItem, currentTab, assets, reloadCurrentTab, showToast]);
 
+  /** 批量导入素材（多选文件，单个失败不中断） */
+  const handleBatchImport = useCallback(async () => {
+    if (!currentWorkId || loading) return;
+    setLoading(true);
+    try {
+      const { imported, failed } = await importAssetsWithDialog(currentWorkId);
+      if (imported.length > 0) {
+        showToast(
+          `成功导入 ${imported.length} 个素材${failed.length > 0 ? `，${failed.length} 个失败` : ''}`,
+          failed.length > 0 ? 'warning' : 'success'
+        );
+        await reloadCurrentTab();
+      } else if (failed.length > 0) {
+        showToast(`全部导入失败：${failed[0]}`, 'error');
+      }
+    } catch (error: any) {
+      showToast(error.message || '批量导入失败', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentWorkId, loading, reloadCurrentTab, showToast]);
+
   /** 在系统文件管理器中显示素材文件 */
   const handleRevealAsset = useCallback(async (asset: Asset) => {
     try {
@@ -481,13 +504,25 @@ export default function DirectorView() {
           </div>
         </div>
 
-        <button
-          onClick={handleQuickCreate}
-          disabled={loading || !currentWorkId}
-          className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? '处理中...' : currentTab === 'assets' ? '+ 导入素材' : '+ 新建'}
-        </button>
+        <div className="flex items-center gap-2">
+          {currentTab === 'assets' && (
+            <button
+              onClick={handleBatchImport}
+              disabled={loading || !currentWorkId}
+              className="px-4 py-2 border border-primary-400 text-primary-600 rounded-lg text-sm font-medium hover:bg-primary-50 transition-colors disabled:opacity-50"
+              title="一次选择多个文件导入"
+            >
+              ⏫ 批量导入
+            </button>
+          )}
+          <button
+            onClick={handleQuickCreate}
+            disabled={loading || !currentWorkId}
+            className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {loading ? '处理中...' : currentTab === 'assets' ? '+ 导入素材' : '+ 新建'}
+          </button>
+        </div>
       </div>
 
       {/* 内容区域 */}
