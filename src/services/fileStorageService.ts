@@ -26,7 +26,7 @@
  *         │   └── <file_id>.ext
  */
 
-import { appDataDir } from '@tauri-apps/api/path';
+import { appDataDir, join } from '@tauri-apps/api/path';
 import {
   exists,
   mkdir,
@@ -101,8 +101,8 @@ const MIME_TYPE_MAP: Record<string, string> = {
  * 获取资源根目录路径
  */
 async function getAssetsDir(): Promise<string> {
-  const appData = await appDataDir();
-  return `${appData}${ASSETS_DIR}`;
+  // appDataDir() 不带尾部分隔符，必须用 join 拼接
+  return await join(await appDataDir(), ASSETS_DIR);
 }
 
 /**

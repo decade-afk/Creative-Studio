@@ -23,6 +23,14 @@ import Database from '@tauri-apps/plugin-sql';
 let db: Database | null = null;
 
 /**
+ * 初始化进行中的 Promise
+ *
+ * 【作用】并发调用 getDatabase() 时（如 React StrictMode 双挂载），
+ * 所有调用共享同一次初始化，避免迁移脚本并发执行导致表损坏
+ */
+let initPromise: Promise<Database> | null = null;
+
+/**
  * 数据库文件路径
  * 存储在应用数据目录下的 creative-studio.db
  */
@@ -35,58 +43,70 @@ const DB_PATH = 'sqlite:creative-studio.db';
  * v1: works, chapters, characters
  * v2: outline_nodes, scenes, milestones, clues, conflicts, storyboards, assets
  * v3: 修复 outline_nodes.parent_id 外键约束
+ * v4: 乐观锁 version 字段 + chapter_versions 章节版本快照表
  */
-const CURRENT_DB_VERSION = 3;
+const CURRENT_DB_VERSION = 4;
 
 /**
  * 获取数据库实例
  * 如果数据库未初始化，则先初始化
  *
+ * 【并发安全】初始化过程通过 initPromise 串行化：
+ * 并发调用（React StrictMode 会双挂载组件）只会触发一次初始化
+ *
  * @returns Promise<Database> 数据库实例
  */
 export async function getDatabase(): Promise<Database> {
-  // 如果已经初始化，直接返回
+  // 已经初始化完成，直接返回
   if (db) {
     return db;
   }
 
-  // 首次访问，加载数据库
-  try {
-    db = await Database.load(DB_PATH);
-    console.log('✅ 数据库加载成功:', DB_PATH);
-
-    // 初始化数据库表结构
-    await initializeDatabase();
-
-    return db;
-  } catch (error) {
-    console.error('❌ 数据库加载失败:', error);
-    throw new Error(`数据库初始化失败: ${error}`);
+  // 初始化进行中：等待同一次初始化（而不是再次执行迁移）
+  if (initPromise) {
+    return initPromise;
   }
+
+  initPromise = (async () => {
+    try {
+      // 首次访问，加载数据库
+      const instance = await Database.load(DB_PATH);
+      console.log('✅ 数据库加载成功:', DB_PATH);
+
+      // 初始化数据库表结构
+      await initializeDatabase(instance);
+
+      db = instance;
+      return instance;
+    } catch (error) {
+      console.error('❌ 数据库加载失败:', error);
+      // 失败时清空 promise，允许下次调用重试
+      initPromise = null;
+      throw new Error(`数据库初始化失败: ${error}`);
+    }
+  })();
+
+  return initPromise;
 }
 
 /**
  * 初始化数据库表结构
  * 创建所有必要的表和索引
  */
-async function initializeDatabase(): Promise<void> {
-  if (!db) {
-    throw new Error('数据库未初始化');
-  }
-
+async function initializeDatabase(instance: Database): Promise<void> {
   console.log('🔧 开始初始化数据库表结构...');
 
   try {
     // 1. 创建版本管理表
-    await createVersionTable();
+    await createVersionTable(instance);
 
     // 2. 检查当前数据库版本
-    const currentVersion = await getDatabaseVersion();
+    const currentVersion = await getDatabaseVersion(instance);
     console.log(`📊 当前数据库版本: ${currentVersion}`);
 
     // 3. 如果是新数据库或需要升级
     if (currentVersion < CURRENT_DB_VERSION) {
-      await migrateDatabase(currentVersion, CURRENT_DB_VERSION);
+      await migrateDatabase(instance, currentVersion, CURRENT_DB_VERSION);
     }
 
     console.log('✅ 数据库初始化完成');
@@ -100,10 +120,8 @@ async function initializeDatabase(): Promise<void> {
  * 创建版本管理表
  * 用于追踪数据库schema版本
  */
-async function createVersionTable(): Promise<void> {
-  if (!db) return;
-
-  await db.execute(`
+async function createVersionTable(instance: Database): Promise<void> {
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS db_version (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       version INTEGER NOT NULL,
@@ -112,12 +130,12 @@ async function createVersionTable(): Promise<void> {
   `);
 
   // 如果表为空，插入初始版本
-  const result = await db.select<Array<{ count: number }>>(
+  const result = await instance.select<Array<{ count: number }>>(
     'SELECT COUNT(*) as count FROM db_version'
   );
 
   if (result[0].count === 0) {
-    await db.execute(
+    await instance.execute(
       'INSERT INTO db_version (id, version) VALUES (1, 0)'
     );
   }
@@ -128,10 +146,8 @@ async function createVersionTable(): Promise<void> {
  *
  * @returns Promise<number> 数据库版本号
  */
-async function getDatabaseVersion(): Promise<number> {
-  if (!db) return 0;
-
-  const result = await db.select<Array<{ version: number }>>(
+async function getDatabaseVersion(instance: Database): Promise<number> {
+  const result = await instance.select<Array<{ version: number }>>(
     'SELECT version FROM db_version WHERE id = 1'
   );
 
@@ -142,12 +158,11 @@ async function getDatabaseVersion(): Promise<number> {
  * 数据库迁移
  * 从旧版本升级到新版本
  *
+ * @param instance 数据库实例
  * @param fromVersion 当前版本
  * @param toVersion 目标版本
  */
-async function migrateDatabase(fromVersion: number, toVersion: number): Promise<void> {
-  if (!db) return;
-
+async function migrateDatabase(instance: Database, fromVersion: number, toVersion: number): Promise<void> {
   console.log(`🔄 开始数据库迁移: v${fromVersion} -> v${toVersion}`);
 
   // 执行各版本的迁移脚本
@@ -156,23 +171,23 @@ async function migrateDatabase(fromVersion: number, toVersion: number): Promise<
 
     switch (version) {
       case 1:
-        await migrateToV1();
+        await migrateToV1(instance);
         break;
       case 2:
-        await migrateToV2();
+        await migrateToV2(instance);
         break;
       case 3:
-        await migrateToV3();
+        await migrateToV3(instance);
         break;
       case 4:
-        await migrateToV4();
+        await migrateToV4(instance);
         break;
       default:
         throw new Error(`未知的迁移版本: ${version}`);
     }
 
     // 更新版本号
-    await db.execute(
+    await instance.execute(
       `UPDATE db_version SET version = ?, updated_at = datetime('now') WHERE id = 1`,
       [version]
     );
@@ -185,13 +200,13 @@ async function migrateDatabase(fromVersion: number, toVersion: number): Promise<
  * 迁移到V1 - 创建基础表结构
  * 包括：works（作品）、chapters（章节）、characters（角色）
  */
-async function migrateToV1(): Promise<void> {
-  if (!db) return;
+async function migrateToV1(instance: Database): Promise<void> {
+
 
   // ========================================
   // 1. 创建作品表 (works)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS works (
       -- 主键：UUID格式的字符串
       id TEXT PRIMARY KEY NOT NULL,
@@ -223,13 +238,13 @@ async function migrateToV1(): Promise<void> {
   `);
 
   // 创建索引：加速按类型查询
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_works_type
     ON works(type)
   `);
 
   // 创建索引：加速按创建时间排序
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_works_created_at
     ON works(created_at DESC)
   `);
@@ -237,7 +252,7 @@ async function migrateToV1(): Promise<void> {
   // ========================================
   // 2. 创建章节表 (chapters)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS chapters (
       -- 主键：UUID格式的字符串
       id TEXT PRIMARY KEY NOT NULL,
@@ -272,13 +287,13 @@ async function migrateToV1(): Promise<void> {
   `);
 
   // 创建索引：加速按作品ID查询章节
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_chapters_work_id
     ON chapters(work_id)
   `);
 
   // 创建索引：加速章节排序
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_chapters_order
     ON chapters(work_id, chapter_order)
   `);
@@ -286,7 +301,7 @@ async function migrateToV1(): Promise<void> {
   // ========================================
   // 3. 创建角色表 (characters)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS characters (
       -- 主键：UUID
       id TEXT PRIMARY KEY NOT NULL,
@@ -327,7 +342,7 @@ async function migrateToV1(): Promise<void> {
   `);
 
   // 创建索引：加速按作品ID查询角色
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_characters_work_id
     ON characters(work_id)
   `);
@@ -339,13 +354,13 @@ async function migrateToV1(): Promise<void> {
  * 迁移到V2 - 创建 Planner 和 Director 视图表
  * 包括：outline_nodes, scenes, milestones, clues, conflicts, storyboards, assets
  */
-async function migrateToV2(): Promise<void> {
-  if (!db) return;
+async function migrateToV2(instance: Database): Promise<void> {
+
 
   // ========================================
   // 1. 创建大纲节点表 (outline_nodes)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS outline_nodes (
       id TEXT PRIMARY KEY NOT NULL,
       work_id TEXT NOT NULL,
@@ -362,12 +377,12 @@ async function migrateToV2(): Promise<void> {
     )
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_outline_nodes_work_id
     ON outline_nodes(work_id)
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_outline_nodes_parent_id
     ON outline_nodes(parent_id)
   `);
@@ -375,7 +390,7 @@ async function migrateToV2(): Promise<void> {
   // ========================================
   // 2. 创建场景表 (scenes)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS scenes (
       id TEXT PRIMARY KEY NOT NULL,
       work_id TEXT NOT NULL,
@@ -392,7 +407,7 @@ async function migrateToV2(): Promise<void> {
     )
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_scenes_work_id
     ON scenes(work_id)
   `);
@@ -400,7 +415,7 @@ async function migrateToV2(): Promise<void> {
   // ========================================
   // 3. 创建里程碑表 (milestones)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS milestones (
       id TEXT PRIMARY KEY NOT NULL,
       work_id TEXT NOT NULL,
@@ -416,12 +431,12 @@ async function migrateToV2(): Promise<void> {
     )
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_milestones_work_id
     ON milestones(work_id)
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_milestones_status
     ON milestones(status)
   `);
@@ -429,7 +444,7 @@ async function migrateToV2(): Promise<void> {
   // ========================================
   // 4. 创建伏笔表 (clues)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS clues (
       id TEXT PRIMARY KEY NOT NULL,
       work_id TEXT NOT NULL,
@@ -447,12 +462,12 @@ async function migrateToV2(): Promise<void> {
     )
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_clues_work_id
     ON clues(work_id)
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_clues_status
     ON clues(status)
   `);
@@ -460,7 +475,7 @@ async function migrateToV2(): Promise<void> {
   // ========================================
   // 5. 创建冲突点表 (conflicts)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS conflicts (
       id TEXT PRIMARY KEY NOT NULL,
       work_id TEXT NOT NULL,
@@ -480,17 +495,17 @@ async function migrateToV2(): Promise<void> {
     )
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_conflicts_work_id
     ON conflicts(work_id)
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_conflicts_type
     ON conflicts(type)
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_conflicts_intensity
     ON conflicts(intensity)
   `);
@@ -498,7 +513,7 @@ async function migrateToV2(): Promise<void> {
   // ========================================
   // 6. 创建分镜表 (storyboards)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS storyboards (
       id TEXT PRIMARY KEY NOT NULL,
       work_id TEXT NOT NULL,
@@ -519,12 +534,12 @@ async function migrateToV2(): Promise<void> {
     )
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_storyboards_work_id
     ON storyboards(work_id)
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_storyboards_chapter_id
     ON storyboards(chapter_id)
   `);
@@ -532,7 +547,7 @@ async function migrateToV2(): Promise<void> {
   // ========================================
   // 7. 创建素材表 (assets)
   // ========================================
-  await db.execute(`
+  await instance.execute(`
     CREATE TABLE IF NOT EXISTS assets (
       id TEXT PRIMARY KEY NOT NULL,
       work_id TEXT NOT NULL,
@@ -550,12 +565,12 @@ async function migrateToV2(): Promise<void> {
     )
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_assets_work_id
     ON assets(work_id)
   `);
 
-  await db.execute(`
+  await instance.execute(`
     CREATE INDEX IF NOT EXISTS idx_assets_type
     ON assets(type)
   `);
@@ -564,20 +579,98 @@ async function migrateToV2(): Promise<void> {
 }
 
 /**
+ * 检查表是否存在
+ */
+async function tableExists(instance: Database, tableName: string): Promise<boolean> {
+  const result = await instance.select<Array<{ name: string }>>(
+    `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`,
+    [tableName]
+  );
+  return result.length > 0;
+}
+
+/**
  * 数据库迁移 v2 -> v3
  * 修复 outline_nodes 表的 parent_id 外键约束
+ *
+ * 【幂等性说明】
+ * 旧版本存在并发迁移 bug：outline_nodes 已被删除但 outline_nodes_new
+ * 未能转正，数据库卡在中间状态。此处对残留状态做恢复处理，
+ * 保证迁移可以重复执行直至成功。
  */
-async function migrateToV3(): Promise<void> {
-  const db = await getDatabase();
-
+async function migrateToV3(instance: Database): Promise<void> {
   console.log('🔧 修复 outline_nodes 表外键约束...');
 
   // SQLite 不支持 ALTER TABLE ADD CONSTRAINT
   // 需要重建表
 
+  const hasOld = await tableExists(instance, 'outline_nodes');
+  const hasNew = await tableExists(instance, 'outline_nodes_new');
+
+  if (!hasOld && hasNew) {
+    // 恢复路径：此前迁移中断，旧表已删但新表未转正
+    console.log('⚠️ 检测到未完成的 v3 迁移，恢复 outline_nodes_new 表...');
+    await instance.execute(`DROP TABLE IF EXISTS outline_nodes`);
+    await instance.execute(`ALTER TABLE outline_nodes_new RENAME TO outline_nodes`);
+  } else if (hasOld && hasNew) {
+    // 恢复路径：数据复制后中断，两张表并存（以旧表数据为准重做）
+    console.log('⚠️ 检测到迁移残留的 outline_nodes_new 表，清理后重做迁移...');
+    await instance.execute(`DROP TABLE outline_nodes_new`);
+
+    await rebuildOutlineNodesTable(instance);
+  } else if (hasOld) {
+    // 正常路径：重建表以添加 parent_id 外键约束
+    await rebuildOutlineNodesTable(instance);
+  } else {
+    // 两表都不存在：v2 迁移未执行过却进入了 v3，直接建新表
+    console.log('⚠️ outline_nodes 表不存在，直接创建带外键约束的新表...');
+    await createOutlineNodesTable(instance);
+  }
+
+  // 重建索引
+  await instance.execute(`
+    CREATE INDEX IF NOT EXISTS idx_outline_nodes_work_id
+    ON outline_nodes(work_id)
+  `);
+
+  await instance.execute(`
+    CREATE INDEX IF NOT EXISTS idx_outline_nodes_parent_id
+    ON outline_nodes(parent_id)
+  `);
+
+  console.log('✅ outline_nodes 表外键约束修复完成');
+}
+
+/**
+ * 重建 outline_nodes 表（带 parent_id 外键约束）
+ * 原表数据完整迁移
+ */
+async function rebuildOutlineNodesTable(instance: Database): Promise<void> {
   // 1. 创建新表，添加 parent_id 外键约束
-  await db.execute(`
-    CREATE TABLE IF NOT EXISTS outline_nodes_new (
+  await createOutlineNodesTable(instance, 'outline_nodes_new');
+
+  // 2. 复制数据
+  await instance.execute(`
+    INSERT INTO outline_nodes_new
+    SELECT * FROM outline_nodes
+  `);
+
+  // 3. 删除旧表
+  await instance.execute(`DROP TABLE outline_nodes`);
+
+  // 4. 重命名新表
+  await instance.execute(`ALTER TABLE outline_nodes_new RENAME TO outline_nodes`);
+}
+
+/**
+ * 创建 outline_nodes 表
+ *
+ * @param instance 数据库实例
+ * @param tableName 表名（默认 outline_nodes，重建时传 outline_nodes_new）
+ */
+async function createOutlineNodesTable(instance: Database, tableName = 'outline_nodes'): Promise<void> {
+  await instance.execute(`
+    CREATE TABLE IF NOT EXISTS ${tableName} (
       id TEXT PRIMARY KEY NOT NULL,
       work_id TEXT NOT NULL,
       parent_id TEXT,
@@ -590,44 +683,17 @@ async function migrateToV3(): Promise<void> {
       synced_at TEXT,
       deleted INTEGER NOT NULL DEFAULT 0,
       FOREIGN KEY (work_id) REFERENCES works(id) ON DELETE CASCADE,
-      FOREIGN KEY (parent_id) REFERENCES outline_nodes_new(id) ON DELETE CASCADE
+      FOREIGN KEY (parent_id) REFERENCES ${tableName}(id) ON DELETE CASCADE
     )
   `);
-
-  // 2. 复制数据
-  await db.execute(`
-    INSERT INTO outline_nodes_new
-    SELECT * FROM outline_nodes
-  `);
-
-  // 3. 删除旧表
-  await db.execute(`DROP TABLE outline_nodes`);
-
-  // 4. 重命名新表
-  await db.execute(`ALTER TABLE outline_nodes_new RENAME TO outline_nodes`);
-
-  // 5. 重建索引
-  await db.execute(`
-    CREATE INDEX IF NOT EXISTS idx_outline_nodes_work_id
-    ON outline_nodes(work_id)
-  `);
-
-  await db.execute(`
-    CREATE INDEX IF NOT EXISTS idx_outline_nodes_parent_id
-    ON outline_nodes(parent_id)
-  `);
-
-  console.log('✅ outline_nodes 表外键约束修复完成');
 }
 
 /**
  * 数据库迁移 v3 -> v4
  * 为所有表添加 version 字段，实现乐观锁（并发控制）
  */
-async function migrateToV4(): Promise<void> {
-  const db = await getDatabase();
-
-  console.log('🔧 添加 version 字段以实现乐观锁...');
+async function migrateToV4(instance: Database): Promise<void> {
+  console.log('🔧 添加 version 字段与章节版本快照表...');
 
   // 需要添加 version 字段的表列表
   const tables = [
@@ -646,7 +712,7 @@ async function migrateToV4(): Promise<void> {
   // 为每个表添加 version 字段
   for (const table of tables) {
     try {
-      await db.execute(`
+      await instance.execute(`
         ALTER TABLE ${table}
         ADD COLUMN version INTEGER NOT NULL DEFAULT 1
       `);
@@ -657,7 +723,28 @@ async function migrateToV4(): Promise<void> {
     }
   }
 
-  console.log('✅ 乐观锁字段添加完成');
+  // 章节版本快照表（手动/关键操作前自动保存，支持恢复）
+  await instance.execute(`
+    CREATE TABLE IF NOT EXISTS chapter_versions (
+      id TEXT PRIMARY KEY NOT NULL,
+      chapter_id TEXT NOT NULL,
+      work_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      content TEXT NOT NULL,
+      word_count INTEGER NOT NULL DEFAULT 0,
+      label TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE,
+      FOREIGN KEY (work_id) REFERENCES works(id) ON DELETE CASCADE
+    )
+  `);
+
+  await instance.execute(`
+    CREATE INDEX IF NOT EXISTS idx_chapter_versions_chapter
+    ON chapter_versions(chapter_id, created_at DESC)
+  `);
+
+  console.log('✅ v4 迁移完成（乐观锁 + 章节版本快照）');
 }
 
 /**

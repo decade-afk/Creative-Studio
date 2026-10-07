@@ -12,7 +12,7 @@
  * - Linux: ~/.local/share/com.creativestudio.desktop/config.json
  */
 
-import { appDataDir } from '@tauri-apps/api/path';
+import { appDataDir, join } from '@tauri-apps/api/path';
 import { exists, readTextFile, writeTextFile, mkdir } from '@tauri-apps/plugin-fs';
 
 /**
@@ -74,6 +74,24 @@ export interface AppConfig {
     interval: number;
     /** 保留备份数量 */
     keepCount: number;
+    /** 上次备份时间 (ISO 8601，由 backupService 维护) */
+    lastBackupAt?: string;
+  };
+
+  /** AI 服务配置 */
+  ai: {
+    /** 服务商预设 ID（kimi | deepseek | glm | openai | openrouter | lmstudio | ollama | custom） */
+    provider: string;
+    /** API Base URL（OpenAI 兼容，不含 /chat/completions） */
+    baseUrl: string;
+    /** API Key */
+    apiKey: string;
+    /** 模型 ID */
+    model: string;
+    /** 采样温度 (0-2) */
+    temperature: number;
+    /** 单次回复最大 token 数 */
+    maxTokens: number;
   };
 
   /** 上次打开的作品ID */
@@ -87,7 +105,7 @@ export interface AppConfig {
  * 默认配置
  */
 const DEFAULT_CONFIG: AppConfig = {
-  version: '0.1.0',
+  version: '0.2.0',
   theme: 'auto',
   editor: {
     fontSize: 16,
@@ -115,6 +133,14 @@ const DEFAULT_CONFIG: AppConfig = {
     interval: 24,
     keepCount: 7,
   },
+  ai: {
+    provider: 'kimi',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    apiKey: '',
+    model: 'moonshot-v1-8k',
+    temperature: 0.7,
+    maxTokens: 2048,
+  },
   isFirstLaunch: true,
 };
 
@@ -126,11 +152,14 @@ const CONFIG_FILE_NAME = 'config.json';
 /**
  * 获取配置文件完整路径
  *
+ * 【注意】appDataDir() 返回的路径不带尾部分隔符，
+ * 必须使用 join() 拼接，直接字符串拼接会产生
+ * "...com.creativestudio.desktopconfig.json" 这样的非法路径
+ *
  * @returns Promise<string> 配置文件路径
  */
 async function getConfigPath(): Promise<string> {
-  const appData = await appDataDir();
-  return `${appData}${CONFIG_FILE_NAME}`;
+  return await join(await appDataDir(), CONFIG_FILE_NAME);
 }
 
 /**
