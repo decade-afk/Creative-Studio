@@ -33,6 +33,7 @@ interface AppMenuProps {
   onToggleSidebar?: () => void;
   onSearch?: () => void;
   onReplace?: () => void;
+  onTrash?: () => void;
   onToggleAiPanel?: () => void;
 }
 
@@ -45,6 +46,7 @@ export default function AppMenu({
   onToggleSidebar,
   onSearch,
   onReplace,
+  onTrash,
   onToggleAiPanel
 }: AppMenuProps) {
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
@@ -90,6 +92,10 @@ export default function AppMenu({
           onClick: onExport
         },
         { divider: true },
+        {
+          label: '回收站...',
+          onClick: onTrash
+        },
         {
           label: '设置',
           shortcut: formatShortcut(ShortcutPresets.settings(() => {})),

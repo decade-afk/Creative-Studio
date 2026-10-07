@@ -183,6 +183,8 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
     setSavingShortcuts(true);
     try {
       saveShortcuts(shortcuts);
+      // 通知 App 重新加载自定义快捷键（立即生效）
+      window.dispatchEvent(new CustomEvent('creative-studio:config-changed'));
       showToast('快捷键配置已保存', 'success');
     } catch (error: any) {
       showToast(`保存失败: ${error}`, 'error');

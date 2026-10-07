@@ -83,6 +83,7 @@ import {
 } from '../services/worldSettingService';
 import { useToast } from '../components/Toast';
 import ConfirmDialog from '../components/ConfirmDialog';
+import CharacterGraph from '../components/CharacterGraph';
 
 type Tab = 'outline' | 'characters' | 'scenes' | 'milestones' | 'worldSettings';
 
@@ -105,6 +106,7 @@ export default function PlannerView() {
   const [worldSettings, setWorldSettings] = useState<WorldSetting[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<WorldSettingCategory | null>(null);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
+  const [charsViewMode, setCharsViewMode] = useState<'cards' | 'graph'>('cards');
 
   // UI 状态
   const [editingItem, setEditingItem] = useState<EditingItem>(null);
@@ -882,14 +884,47 @@ export default function PlannerView() {
         )}
 
         {!loading && currentTab === 'characters' && (
-          <CharactersView
-            characters={characters}
-            onEdit={(item) => setEditingItem({ type: 'characters', item })}
-            onDelete={(id) => {
-              const c = characters.find((x) => x.id === id);
-              setDeletingItem({ id, title: c?.name || '角色', childCount: 0 });
-            }}
-          />
+          <div className="space-y-3">
+            {/* 卡片 / 图谱视图切换 */}
+            <div className="flex items-center justify-end gap-1">
+              <button
+                onClick={() => setCharsViewMode('cards')}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  charsViewMode === 'cards'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-surface-secondary border border-outline text-on-surface-secondary hover:bg-surface-tertiary'
+                }`}
+              >
+                ▦ 卡片
+              </button>
+              <button
+                onClick={() => setCharsViewMode('graph')}
+                className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
+                  charsViewMode === 'graph'
+                    ? 'bg-primary-500 text-white'
+                    : 'bg-surface-secondary border border-outline text-on-surface-secondary hover:bg-surface-tertiary'
+                }`}
+              >
+                🕸️ 关系图谱
+              </button>
+            </div>
+
+            {charsViewMode === 'cards' ? (
+              <CharactersView
+                characters={characters}
+                onEdit={(item) => setEditingItem({ type: 'characters', item })}
+                onDelete={(id) => {
+                  const c = characters.find((x) => x.id === id);
+                  setDeletingItem({ id, title: c?.name || '角色', childCount: 0 });
+                }}
+              />
+            ) : (
+              <CharacterGraph
+                characters={characters}
+                onEdit={(item) => setEditingItem({ type: 'characters', item })}
+              />
+            )}
+          </div>
         )}
 
         {!loading && currentTab === 'scenes' && (

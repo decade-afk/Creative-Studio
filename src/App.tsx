@@ -36,7 +36,8 @@
  * 3. 视图组件内部管理自己的状态和数据
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { getCurrentWindow, LogicalSize, LogicalPosition } from '@tauri-apps/api/window';
 import TitleBar from './components/TitleBar';
 import AppNavigation from './components/AppNavigation';
 import WriterView from './views/WriterView';
@@ -44,7 +45,9 @@ import DirectorView from './views/DirectorView';
 import PlannerView from './views/PlannerView';
 import SettingsView from './views/SettingsView';
 import SearchPanel from './components/SearchPanel';
-import { useKeyboardShortcuts, ShortcutPresets } from './hooks/useKeyboardShortcuts';
+import TrashDialog from './components/TrashDialog';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { getShortcuts } from './services/shortcutService';
 import { useWriterStore } from './stores/writerStore';
 import { useTheme } from './contexts/ThemeContext';
 import { useToast } from './components/Toast';
@@ -148,6 +151,7 @@ function App() {
   // ==========================================================================
 
   const [showSearch, setShowSearch] = useState(false);
+  const [showTrash, setShowTrash] = useState(false);
   const { showToast, ToastComponent } = useToast();
 
   /**
@@ -270,6 +274,23 @@ function App() {
           await updateConfig({ isFirstLaunch: false });
         }
 
+        // 恢复上次窗口状态（位置/尺寸/最大化）
+        if (config.window.rememberSize) {
+          try {
+            const appWindow = getCurrentWindow();
+            if (config.window.maximized) {
+              await appWindow.maximize();
+            } else if (config.window.lastSize) {
+              await appWindow.setSize(new LogicalSize(config.window.lastSize.width, config.window.lastSize.height));
+              if (config.window.lastPosition) {
+                await appWindow.setPosition(new LogicalPosition(config.window.lastPosition.x, config.window.lastPosition.y));
+              }
+            }
+          } catch (error) {
+            console.warn('⚠️ 恢复窗口状态失败:', error);
+          }
+        }
+
         await startAutoBackupScheduler();
       } catch (error) {
         console.error('❌ 启动配置加载失败:', error);
@@ -281,6 +302,57 @@ function App() {
     };
     // setMode 来自 ThemeContext，引用稳定；仅在挂载时执行一次
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /**
+   * 窗口关闭时保存状态（位置/尺寸/最大化）
+   * 拦截关闭请求：先写配置再销毁窗口；最大化时只记标志
+   */
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+
+    (async () => {
+      try {
+        const appWindow = getCurrentWindow();
+        unlisten = await appWindow.onCloseRequested(async (event) => {
+          event.preventDefault();
+          try {
+            const config = await loadConfig();
+            if (config.window.rememberSize) {
+              const maximized = await appWindow.isMaximized();
+              if (maximized) {
+                await updateConfig({ window: { ...config.window, maximized: true } });
+              } else {
+                const size = await appWindow.innerSize();
+                const position = await appWindow.outerPosition();
+                const scale = await appWindow.scaleFactor();
+                await updateConfig({
+                  window: {
+                    ...config.window,
+                    maximized: false,
+                    lastSize: { width: Math.round(size.width / scale), height: Math.round(size.height / scale) },
+                    lastPosition: { x: Math.round(position.x / scale), y: Math.round(position.y / scale) },
+                  },
+                });
+              }
+            }
+          } catch (error) {
+            console.warn('⚠️ 保存窗口状态失败:', error);
+          } finally {
+            await appWindow.destroy();
+          }
+        });
+        if (disposed) unlisten();
+      } catch {
+        // 非 Tauri 环境忽略
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
   }, []);
 
   // ==========================================================================
@@ -410,28 +482,74 @@ function App() {
    * - 快捷键在输入框、文本域、可编辑元素中不生效
    * - 自动适配 macOS 和 Windows/Linux 平台
    */
-  useKeyboardShortcuts([
-    ShortcutPresets.new(handleNewWork),
-    ShortcutPresets.newChapter(handleNewChapter),
-    ShortcutPresets.export(handleExport),
-    ShortcutPresets.settings(() => setShowSettings(true)),
-    ShortcutPresets.toggleSidebar(handleToggleSidebar),
-    ShortcutPresets.find(() => setShowSearch(true)),
-    ShortcutPresets.replace(() => {
-      setCurrentView('writer');
-      window.dispatchEvent(new CustomEvent('creative-studio:replace'));
-    }),
-    ShortcutPresets.save(() => {
-      // 触发 WriterView 的立即保存（监听 window 事件）
-      window.dispatchEvent(new CustomEvent('creative-studio:save'));
-    }),
-    {
-      key: 'j',
-      ctrl: true,
-      handler: handleToggleAiPanel,
-      description: 'AI 创作助手',
-    },
-  ]);
+  // ==========================================================================
+  // 自定义快捷键生效
+  // ==========================================================================
+
+  /**
+   * 读取用户自定义快捷键（设置 → 快捷键），保存后实时生效
+   *
+   * 【说明】
+   * - shortcutService 以字符串（如 "Ctrl+Shift+F"）持久化到 localStorage
+   * - 此处解析为 useKeyboardShortcuts 需要的结构，并按 action 分派处理函数
+   * - SettingsView 保存快捷键后派发 config-changed 事件，此处刷新
+   */
+  const [customShortcuts, setCustomShortcuts] = useState(() => getShortcuts());
+
+  useEffect(() => {
+    const refresh = () => setCustomShortcuts(getShortcuts());
+    window.addEventListener('creative-studio:config-changed', refresh);
+    // shortcutService 保存只写 localStorage，SettingsView 保存后也会派发上述事件；
+    // 同时监听 storage 事件覆盖其它写入路径
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener('creative-studio:config-changed', refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
+
+  /** 将 "Ctrl+Shift+F" 字符串解析为按键配置（末段为按键，其余为修饰键） */
+  const parseShortcutString = useCallback((str: string): { key: string; ctrl: boolean; shift: boolean; alt: boolean } => {
+    const parts = str.split('+').map((p) => p.trim().toLowerCase()).filter(Boolean);
+    return {
+      key: parts[parts.length - 1] || '',
+      ctrl: parts.includes('ctrl'),
+      shift: parts.includes('shift'),
+      alt: parts.includes('alt'),
+    };
+  }, []);
+
+  const shortcuts = useMemo(
+    () => [
+      { ...parseShortcutString(customShortcuts.global.newWork), handler: handleNewWork, description: '新建作品' },
+      { ...parseShortcutString(customShortcuts.global.newChapter), handler: handleNewChapter, description: '新建章节' },
+      { ...parseShortcutString(customShortcuts.global.export), handler: handleExport, description: '导出' },
+      { ...parseShortcutString(customShortcuts.global.settings), handler: () => setShowSettings(true), description: '设置' },
+      { ...parseShortcutString(customShortcuts.global.search), handler: () => setShowSearch(true), description: '全局搜索' },
+      { ...parseShortcutString(customShortcuts.global.save), handler: () => {
+        window.dispatchEvent(new CustomEvent('creative-studio:save'));
+      }, description: '保存' },
+      { ...parseShortcutString(customShortcuts.editor.bold), handler: handleToggleSidebar, description: '切换侧边栏' },
+      {
+        key: 'h',
+        ctrl: true,
+        handler: () => {
+          setCurrentView('writer');
+          window.dispatchEvent(new CustomEvent('creative-studio:replace'));
+        },
+        description: '查找替换',
+      },
+      {
+        key: 'j',
+        ctrl: true,
+        handler: handleToggleAiPanel,
+        description: 'AI 创作助手',
+      },
+    ],
+    [customShortcuts, parseShortcutString, handleNewWork, handleNewChapter, handleExport, handleToggleSidebar, handleToggleAiPanel]
+  );
+
+  useKeyboardShortcuts(shortcuts);
 
   // ==========================================================================
   // 渲染逻辑
@@ -487,6 +605,7 @@ function App() {
           setCurrentView('writer');
           window.dispatchEvent(new CustomEvent('creative-studio:replace'));
         }}
+        onTrash={() => setShowTrash(true)}
         onToggleAiPanel={handleToggleAiPanel}
       />
 
@@ -567,6 +686,17 @@ function App() {
           - AI 功能已移除，无需进行 AI 配置检查
       */}
       {showSettings && <SettingsView onClose={() => setShowSettings(false)} />}
+
+      {/* 回收站 */}
+      {showTrash && (
+        <TrashDialog
+          onClose={() => setShowTrash(false)}
+          onChanged={() => {
+            // 恢复/删除作品后刷新侧边栏列表
+            getWorks().then((loaded) => useWriterStore.getState().setWorks(loaded)).catch(() => undefined);
+          }}
+        />
+      )}
 
       {/* 全局搜索面板 */}
       {showSearch && (

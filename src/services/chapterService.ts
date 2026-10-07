@@ -471,3 +471,52 @@ async function pruneChapterVersions(chapterId: string): Promise<void> {
     [chapterId, MAX_VERSIONS_PER_CHAPTER]
   );
 }
+
+// ============================================================================
+// 回收站（软删除章节的恢复与彻底删除）
+// ============================================================================
+
+/**
+ * 列出作品的已删除章节（回收站视图用）
+ */
+export async function getDeletedChaptersByWorkId(workId: string): Promise<Chapter[]> {
+  const db = await getDatabase();
+  return await db.select<Chapter[]>(
+    `SELECT * FROM chapters WHERE work_id = $1 AND deleted = 1 ORDER BY updated_at DESC`,
+    [workId]
+  );
+}
+
+/**
+ * 列出全部已删除章节（跨作品，回收站视图用）
+ */
+export async function getAllDeletedChapters(): Promise<Chapter[]> {
+  const db = await getDatabase();
+  return await db.select<Chapter[]>(
+    `SELECT * FROM chapters WHERE deleted = 1 ORDER BY updated_at DESC`
+  );
+}
+
+/**
+ * 恢复已删除的章节
+ */
+export async function restoreChapter(id: string): Promise<boolean> {
+  const db = await getDatabase();
+  await db.execute(
+    `UPDATE chapters SET deleted = 0, updated_at = $1 WHERE id = $2`,
+    [getCurrentTimestamp(), id]
+  );
+  console.log('♻️ 章节已恢复:', id);
+  return true;
+}
+
+/**
+ * 彻底删除章节（物理删除，含其版本快照）
+ */
+export async function permanentlyDeleteChapter(id: string): Promise<boolean> {
+  const db = await getDatabase();
+  await db.execute('DELETE FROM chapter_versions WHERE chapter_id = $1', [id]);
+  await db.execute('DELETE FROM chapters WHERE id = $1', [id]);
+  console.log('🔥 章节已彻底删除:', id);
+  return true;
+}

@@ -327,3 +327,17 @@ export async function getWorkStats(): Promise<{
     novels,
   };
 }
+
+// ============================================================================
+// 回收站（软删除作品的列出与清理；恢复/彻底删除见上方已有实现）
+// ============================================================================
+
+/**
+ * 列出全部已删除作品（回收站视图用）
+ */
+export async function getDeletedWorks(): Promise<Work[]> {
+  const db = await getDatabase();
+  return await db.select<Work[]>(
+    `SELECT * FROM works WHERE deleted = 1 ORDER BY updated_at DESC`
+  );
+}
