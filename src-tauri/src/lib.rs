@@ -14,6 +14,7 @@
 
 // 模块声明
 mod ai;
+mod submission;
 mod export;
 mod validation;
 mod errors;
@@ -64,6 +65,9 @@ pub fn run() {
     tauri::Builder::default()
         // ========== 第三步：初始化插件 ==========
 
+        // clipboard 插件：剪贴板读写（投递复制，无 WebView 权限弹窗）
+        .plugin(tauri_plugin_clipboard_manager::init())
+
         // dialog 插件：提供原生文件选择对话框
         // 用途：选择文件、导出位置等
         .plugin(tauri_plugin_dialog::init())
@@ -91,6 +95,10 @@ pub fn run() {
             export::export_to_html,     // 导出为 HTML
             export::export_to_script,   // 导出为 Fountain 分镜脚本
             export::export_to_epub,     // 导出为 EPUB
+
+            // 投递命令
+            submission::open_submission_window, // 打开平台作家后台窗口
+            submission::fill_submission,        // 自动填充章节到平台编辑器
 
             // AI 服务命令
             ai::ai_chat_stream,         // 流式对话补全

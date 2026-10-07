@@ -1,16 +1,17 @@
 {
   "identifier": "default",
   "description": "Default capabilities for Creative Studio",
-  "windows": ["main"],
+  "windows": [
+    "main",
+    "submission-*"
+  ],
   "permissions": [
     "core:default",
-
     "sql:default",
     "sql:allow-load",
     "sql:allow-execute",
     "sql:allow-select",
     "sql:allow-close",
-
     "fs:allow-read",
     "fs:allow-write",
     "fs:allow-exists",
@@ -43,24 +44,19 @@
     "fs:scope-desktop-recursive",
     "fs:scope-temp",
     "fs:scope-temp-recursive",
-
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-message",
     "dialog:allow-ask",
     "dialog:allow-confirm",
-
     "opener:default",
     "opener:allow-open-url",
     "opener:allow-open-path",
     "opener:allow-reveal-item-in-dir",
-
     "shell:default",
     "shell:allow-open",
-
     "core:path:default",
     "core:path:allow-resolve-directory",
-
     "core:window:allow-minimize",
     "core:window:allow-maximize",
     "core:window:allow-unmaximize",
@@ -135,6 +131,8 @@
     "core:window:allow-current-monitor",
     "core:window:allow-available-monitors",
     "core:window:allow-scale-factor",
-    "core:window:allow-cursor-position"
+    "core:window:allow-cursor-position",
+    "clipboard-manager:allow-write-text",
+    "clipboard-manager:allow-read-text"
   ]
 }

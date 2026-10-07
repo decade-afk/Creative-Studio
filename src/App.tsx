@@ -42,6 +42,7 @@ import TitleBar from './components/TitleBar';
 import AppNavigation from './components/AppNavigation';
 import WriterView from './views/WriterView';
 import DirectorView from './views/DirectorView';
+import SubmissionView from './views/SubmissionView';
 import PlannerView from './views/PlannerView';
 import SettingsView from './views/SettingsView';
 import SearchPanel from './components/SearchPanel';
@@ -70,7 +71,7 @@ import { calculateWordCount } from './utils/wordCount';
  * - 'planner': 规划视图，用于大纲、角色、场景管理
  * - 'director': 导演视图，用于伏笔、冲突、分镜管理
  */
-type View = 'writer' | 'planner' | 'director';
+type View = 'writer' | 'planner' | 'director' | 'submission';
 
 // ============================================================================
 // 主应用组件
@@ -667,6 +668,9 @@ function App() {
 
           {/* 导演视图 */}
           {currentView === 'director' && <DirectorView />}
+
+          {/* 投递视图 */}
+          {currentView === 'submission' && <SubmissionView />}
         </div>
       </div>
 

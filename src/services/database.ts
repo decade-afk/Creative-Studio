@@ -44,8 +44,9 @@ const DB_PATH = 'sqlite:creative-studio.db';
  * v2: outline_nodes, scenes, milestones, clues, conflicts, storyboards, assets
  * v3: 修复 outline_nodes.parent_id 外键约束
  * v4: 乐观锁 version 字段 + chapter_versions 章节版本快照表
+ * v5: submissions 投递台账表
  */
-const CURRENT_DB_VERSION = 4;
+const CURRENT_DB_VERSION = 5;
 
 /**
  * 获取数据库实例
@@ -181,6 +182,9 @@ async function migrateDatabase(instance: Database, fromVersion: number, toVersio
         break;
       case 4:
         await migrateToV4(instance);
+        break;
+      case 5:
+        await migrateToV5(instance);
         break;
       default:
         throw new Error(`未知的迁移版本: ${version}`);
@@ -745,6 +749,36 @@ async function migrateToV4(instance: Database): Promise<void> {
   `);
 
   console.log('✅ v4 迁移完成（乐观锁 + 章节版本快照）');
+}
+
+/**
+ * 数据库迁移 v4 -> v5
+ * 投递台账：记录章节向各平台（起点/番茄）的投递历史
+ */
+async function migrateToV5(instance: Database): Promise<void> {
+  console.log('🔧 创建投递台账表...');
+
+  await instance.execute(`
+    CREATE TABLE IF NOT EXISTS submissions (
+      id TEXT PRIMARY KEY NOT NULL,
+      work_id TEXT NOT NULL,
+      chapter_id TEXT NOT NULL,
+      platform TEXT NOT NULL CHECK (platform IN ('qidian', 'fanqie')),
+      chapter_title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'submitted',
+      note TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (work_id) REFERENCES works(id) ON DELETE CASCADE,
+      FOREIGN KEY (chapter_id) REFERENCES chapters(id) ON DELETE CASCADE
+    )
+  `);
+
+  await instance.execute(`
+    CREATE INDEX IF NOT EXISTS idx_submissions_work
+    ON submissions(work_id, created_at DESC)
+  `);
+
+  console.log('✅ v5 迁移完成（投递台账）');
 }
 
 /**
