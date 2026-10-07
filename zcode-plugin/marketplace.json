@@ -1,0 +1,11 @@
+{
+  "name": "creative-studio-local",
+  "description": "Creative Studio 本地插件市场（把桌面创作软件接入 ZCode）",
+  "plugins": [
+    {
+      "name": "creative-studio",
+      "source": "./creative-studio",
+      "description": "让 ZCode 直接读写 Creative Studio 的作品/章节，并调用其内置 AI 工作流（续写/审稿/大纲）"
+    }
+  ]
+}

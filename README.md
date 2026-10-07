@@ -93,6 +93,16 @@ claude mcp add creative-studio -- node <项目路径>/scripts/mcp-server.mjs
 
 示例对话："帮我看看 Creative Studio 里的作品，把第一章续写 500 字然后审一遍稿" —— agent 会依次调用 list_works → list_chapters → ai_continue → ai_review 完成。
 
+### ZCode 插件接入（本项目自带）
+
+仓库内置 ZCode 插件（`zcode-plugin/`），安装后 ZCode 原生获得全部 12 个工具与使用技能：
+
+1. ZCode → 设置 → Plugin Management → Discover → 点 **+** → 选择本项目的 `zcode-plugin` 目录（含 marketplace.json）
+2. 在列表中找到 **creative-studio** 点击安装
+3. **新开会话**即生效：工具 `mcp__creative-studio__*` + 技能 `creative-studio`
+
+之后直接对 ZCode 说"看看我的作品库""把某章续写一段"即可；前提仍是 Creative Studio 正在运行。
+
 ## 开发
 
 ```bash
