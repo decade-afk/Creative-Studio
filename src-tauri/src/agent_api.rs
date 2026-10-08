@@ -152,7 +152,7 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 /** HTML → 纯文本（与前端一致） */
-fn html_to_text(html: &str) -> String {
+pub fn html_to_text(html: &str) -> String {
     let mut pre = html
         .replace("</p>", "\n\n")
         .replace("</div>", "\n\n")
@@ -377,27 +377,123 @@ async fn delete_chapter(
 // AI 端点（复用 ai.rs 的请求逻辑，非流式收集）
 // ============================================================================
 
+/*******************************************************************
+ * 外部 agent 接入端点（MCP/CLI）：免模型密钥。
+ * 调用方拿到组装好的完整 messages，用自己的模型执行后写回。
+ *******************************************************************/
+
+/** 组装故事上下文（世界书命中/前情链/角色卡/作者注），供 agent 检查 */
+async fn ai_context(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    axum::extract::Path(work_id): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let chapter_id = q.get("chapterId").map(|s| s.as_str());
+    // 扫描文本：默认取 chapterId 对应章正文（世界书/角色卡的触发源）
+    let scan_text: Option<String> = match chapter_id {
+        Some(cid) => db
+            .query_row("SELECT content FROM chapters WHERE id = ?1 AND deleted = 0", [cid], |r| r.get::<_, String>(0))
+            .ok(),
+        None => None,
+    };
+    let ctx = crate::context::assemble(&app, &db, &work_id, chapter_id, scan_text.as_deref())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!({
+        "storyBible": ctx.story_bible,
+        "characterCards": ctx.character_cards,
+        "lorebook": ctx.lorebook,
+        "memory": ctx.memory,
+        "authorNote": ctx.author_note,
+        "contextBlock": ctx.render(),
+        "isEmpty": ctx.is_empty(),
+    })))
+}
+
+/** 免模型密钥：返回某动作组装好的完整 messages，agent 用自己的模型执行 */
+async fn ai_prepare(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    axum::extract::Path(chapter_id): axum::extract::Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let action = body["action"].as_str().ok_or((StatusCode::BAD_REQUEST, "action 必填（continue/polish/expand/summary/review）".into()))?;
+    let instruction = body["instruction"].as_str().unwrap_or("");
+    let selection = body["selection"].as_str();
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let (messages, title, used) = crate::context::prepare_messages(&app, &db, &chapter_id, action, instruction, selection)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+    Ok(Json(json!({
+        "action": action,
+        "chapterTitle": title,
+        "usedContext": used,
+        "messages": messages,
+        "hint": "用自己的模型执行 messages；正文结果经 POST /api/chapters/{id}/append 写回；摘要结果经 PUT /api/chapters/{id}/summary 存档供前情链使用"
+    })))
+}
+
+/** 免模型密钥：大纲动作的完整 messages */
+async fn ai_prepare_outline(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let work_id = body["workId"].as_str().ok_or((StatusCode::BAD_REQUEST, "workId 必填".into()))?;
+    let premise = body["premise"].as_str().ok_or((StatusCode::BAD_REQUEST, "premise 必填".into()))?;
+    let count = body["chapterCount"].as_i64().unwrap_or(10);
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let ctx = crate::context::assemble(&app, &db, work_id, None, None)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!({
+        "action": "outline",
+        "usedContext": !ctx.is_empty(),
+        "messages": crate::context::build_outline(premise, count, &ctx),
+    })))
+}
+
+/** 追加正文（纯文本自动转段落 HTML）——外部 agent 写回续写/扩写结果的入口 */
+async fn append_chapter_content(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let text = body["text"].as_str().ok_or((StatusCode::BAD_REQUEST, "text 必填".into()))?;
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let old: String = db
+        .query_row("SELECT content FROM chapters WHERE id = ?1 AND deleted = 0", [&id], |r| r.get::<_, String>(0))
+        .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".into()))?;
+    let addition = text_to_html(text);
+    let new_content = format!("{}{}", old, addition);
+    let n = db
+        .execute(
+            "UPDATE chapters SET content = ?1, updated_at = ?2 WHERE id = ?3 AND deleted = 0",
+            rusqlite::params![new_content, now(), id],
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    if n == 0 { return Err((StatusCode::NOT_FOUND, "章节不存在".into())); }
+    Ok(Json(json!({ "ok": true, "wordCount": word_count(&new_content) })))
+}
 async fn ai_continue(
     axum::extract::State(app): axum::extract::State<AppState>,
     Path(chapter_id): Path<String>,
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    let (title, content): (String, String) = db
-        .query_row("SELECT title, content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".to_string()))?;
-
-    let tail = html_to_text(&content).chars().rev().take(1500).collect::<Vec<_>>().into_iter().rev().collect::<String>();
     let instruction = body["instruction"].as_str().unwrap_or("");
-    let messages = json!([
-        { "role": "system", "content": "你是专业的中文小说创作助手。直接输出续写正文（简体中文），不要解释。使用 <p></p> 段落。" },
-        { "role": "user", "content": format!("请接着下面的正文续写 300-500 字，保持人物、语气连贯，不要重复已有内容：\n\n{}{}", tail, if instruction.is_empty() { String::new() } else { format!("\n\n【补充要求】{}", instruction) }) }
-    ]);
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let old_content: String = db
+        .query_row("SELECT content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r| r.get::<_, String>(0))
+        .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".to_string()))?;
+    let plain = crate::context::html_to_plain(&old_content);
 
-    let reply = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    // 纯文本 → HTML 追加
+    let ctx = crate::context::assemble(&app, &db, {
+        let work_id: String = db
+            .query_row("SELECT work_id FROM chapters WHERE id = ?1", [&chapter_id], |r| r.get::<_, String>(0))
+            .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".to_string()))?;
+        work_id
+    }.as_str(), Some(&chapter_id), Some(&plain))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let messages = crate::context::build_continue(&plain, instruction, &ctx);
+    let reply = crate::ai::chat_once_from_config(&app, json!(messages)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let addition = text_to_html(&reply);
-    let new_content = format!("{}{}", content, addition);
+    let new_content = format!("{}{}", old_content, addition);
     db.execute("UPDATE chapters SET content = ?1, updated_at = ?2 WHERE id = ?3", rusqlite::params![new_content, now(), chapter_id])
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
     Ok(Json(json!({ "added": reply, "wordCount": word_count(&new_content) })))
@@ -408,16 +504,16 @@ async fn ai_review(
     Path(chapter_id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    let (title, content): (String, String) = db
-        .query_row("SELECT title, content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+    let (work_id, title, content): (String, String, String) = db
+        .query_row("SELECT work_id, title, content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })
         .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".to_string()))?;
-
-    let body_text: String = html_to_text(&content).chars().take(8000).collect();
-    let messages = json!([
-        { "role": "system", "content": "你是严格的中文小说审稿编辑。按【逻辑硬伤】【时间线】【人物一致性】【伏笔与悬念】【文笔建议】分类输出，仅列实际存在的问题。" },
-        { "role": "user", "content": format!("请审稿章节「{}」：\n\n{}", title, body_text) }
-    ]);
-    let report = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let plain = crate::context::html_to_plain(&content);
+    let ctx = crate::context::assemble(&app, &db, &work_id, Some(&chapter_id), Some(&plain))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let messages = crate::context::build_review(&title, &plain, &ctx);
+    let report = crate::ai::chat_once_from_config(&app, json!(messages)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(json!({ "report": report })))
 }
 
@@ -429,14 +525,13 @@ async fn ai_outline(
     let premise = body["premise"].as_str().ok_or((StatusCode::BAD_REQUEST, "premise 必填".into()))?.to_string();
     let count = body["chapterCount"].as_i64().unwrap_or(10);
 
-    let messages = json!([
-        { "role": "system", "content": "你是专业的故事策划。直接输出大纲，不要前言。每章一段：第N章 标题：梗概" },
-        { "role": "user", "content": format!("基于以下创意生成 {} 章的故事大纲：\n\n{}", count, premise) }
-    ]);
-    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let ctx = crate::context::assemble(&app, &db, &work_id, None, None)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let messages = crate::context::build_outline(&premise, count, &ctx);
+    let text = crate::ai::chat_once_from_config(&app, json!(messages)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     // 解析并入库：1 幕 + N 场景节点
-    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let max_order: i64 = db
         .query_row("SELECT COALESCE(MAX(\"order\"), -1) FROM outline_nodes WHERE work_id = ?1 AND deleted = 0 AND parent_id IS NULL", [&work_id], |r| r.get(0))
         .unwrap_or(-1);
@@ -555,6 +650,10 @@ pub fn start(app: &tauri::AppHandle) {
             .route("/api/chapters/{id}/title", axum::routing::put(update_chapter_title))
             .route("/api/chapters/{id}/summary", axum::routing::put(update_chapter_summary))
             .route("/api/ai/continue/{chapterId}", axum::routing::post(ai_continue))
+            .route("/api/ai/context/{workId}", axum::routing::get(ai_context))
+            .route("/api/ai/prepare/{chapterId}", axum::routing::post(ai_prepare))
+            .route("/api/ai/prepare-outline", axum::routing::post(ai_prepare_outline))
+            .route("/api/chapters/{id}/append", axum::routing::post(append_chapter_content))
             .route("/api/ai/review/{chapterId}", axum::routing::post(ai_review))
             .route("/api/ai/outline", axum::routing::post(ai_outline))
             .route("/api/search", get(search))
@@ -1120,16 +1219,20 @@ async fn ai_summary(
     Path(chapter_id): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    let (title, content): (String, String) = db
-        .query_row("SELECT title, content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+    let (work_id, title, content): (String, String, String) = db
+        .query_row("SELECT work_id, title, content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?))
+        })
         .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".to_string()))?;
-    let body_text: String = html_to_text(&content).chars().take(8000).collect();
-    let messages = json!([
-        { "role": "system", "content": "你是专业编辑，直接输出摘要，不要前言。" },
-        { "role": "user", "content": format!("为章节「{}」生成 150 字以内的梗概（关键事件、人物动机、结尾悬念）：\n\n{}", title, body_text) }
-    ]);
-    let summary = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-    Ok(Json(json!({ "summary": summary })))
+    let plain = crate::context::html_to_plain(&content);
+    let ctx = crate::context::assemble(&app, &db, &work_id, Some(&chapter_id), Some(&plain))
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let messages = crate::context::build_summary(&title, &plain, &ctx);
+    let summary = crate::ai::chat_once_from_config(&app, json!(messages)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // 摘要落库：供后续章节前情记忆链使用
+    db.execute("UPDATE chapters SET summary = ?1, updated_at = ?2 WHERE id = ?3", rusqlite::params![summary, now(), chapter_id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "summary": summary, "saved": true })))
 }
 
 /** 从 AI 输出提取 JSON 数组（容忍代码块包裹） */
@@ -1151,7 +1254,7 @@ async fn ai_gen_characters(
         { "role": "system", "content": format!("你是小说人物架构师。只输出 JSON 数组，每个元素 {{\"name\":\"\",\"avatar\":\"emoji\",\"description\":\"80字内\",\"personality\":\"\",\"relationships\":\"与其他角色的关系\"}}。生成 {} 个有戏剧张力的角色。", count) },
         { "role": "user", "content": format!("作品创意：{}", premise) }
     ]);
-    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let text = crate::ai::chat_once_from_config(&app, json!(messages)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let arr = extract_json_array(&text).unwrap_or_default();
     let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let mut created = Vec::new();
@@ -1180,7 +1283,7 @@ async fn ai_gen_scenes(
         { "role": "system", "content": format!("你是美术指导。只输出 JSON 数组，每个元素 {{\"name\":\"\",\"location\":\"\",\"timeOfDay\":\"morning|noon|evening|night|other\",\"mood\":\"\",\"description\":\"80字内\"}}。生成 {} 个有画面感的场景。", count) },
         { "role": "user", "content": format!("作品创意：{}", premise) }
     ]);
-    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let text = crate::ai::chat_once_from_config(&app, json!(messages)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let arr = extract_json_array(&text).unwrap_or_default();
     let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let mut created = Vec::new();
@@ -1225,7 +1328,7 @@ async fn ai_detect_clues(
         { "role": "system", "content": "你是严谨的中文编辑。只输出 JSON 数组（可为空 []），每个元素 {\"name\":\"伏笔简称\",\"description\":\"埋设位置与暗示内容\"}。只列确实存在于正文的伏笔。" },
         { "role": "user", "content": format!("检测以下章节中的伏笔：\n\n{}", body_all.chars().take(12000).collect::<String>()) }
     ]);
-    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let text = crate::ai::chat_once_from_config(&app, json!(messages)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let arr = extract_json_array(&text).unwrap_or_default();
     let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let mut created = Vec::new();
@@ -1255,7 +1358,7 @@ async fn ai_gen_storyboards(
         { "role": "system", "content": "你是影视分镜师。只输出 JSON 数组，每个元素 {\"title\":\"\",\"description\":\"\",\"shotType\":\"wide|medium|close|extreme_close\",\"cameraMovement\":\"static|pan|tilt|zoom|dolly|crane\",\"duration\":秒}。8-12 个镜头。" },
         { "role": "user", "content": format!("为章节「{}」设计分镜：\n\n{}", title, html_to_text(&content).chars().take(8000).collect::<String>()) }
     ]);
-    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let text = crate::ai::chat_once_from_config(&app, json!(messages)).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let arr = extract_json_array(&text).unwrap_or_default();
     let base_order: i64 = db
         .query_row("SELECT COUNT(*) FROM storyboards WHERE chapter_id = ?1 AND deleted = 0", [&chapter_id], |r| r.get(0))

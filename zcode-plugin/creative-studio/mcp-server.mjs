@@ -45,24 +45,6 @@ const TOOLS = [
   T('delete_chapter', '删除章节（软删除）', { chapterId: { type: 'string' } }, ['chapterId']),
 
   T('get_outline', '读取大纲树（幕/场景/事件节点，含 AI 生成的）', { workId: { type: 'string' } }, ['workId']),
-  T('create_outline_node', '创建大纲节点（parentId 缺省挂根层；type 缺省：有 parentId 为 scene，否则 act；order 缺省追加到同级末尾）', {
-    workId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
-    parentId: { type: 'string', description: '父节点 id，缺省为根层' },
-    type: { type: 'string', enum: ['act', 'scene', 'event'] },
-    order: { type: 'number', description: '同级序号，缺省排同级末尾' },
-  }, ['workId', 'title']),
-  T('create_outline_batch', '批量创建大纲子树（nodes 支持嵌套 children，一次写入整卷大纲；事务内完成，任一节点非法则整体回滚）', {
-    workId: { type: 'string' },
-    nodes: {
-      type: 'array', items: { type: 'object' },
-      description: '节点 {title, description?, type?, parentId?, order?, children?: [...]}；children 依次挂到上级新建节点下',
-    },
-  }, ['workId', 'nodes']),
-  T('update_outline_node', '更新大纲节点（只改传入字段；parentId 传 null 提升为根层）', {
-    nodeId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
-    parentId: { type: 'string', description: '传 null 提升为根层' },
-    type: { type: 'string', enum: ['act', 'scene', 'event'] }, order: { type: 'number' },
-  }, ['nodeId']),
   T('delete_outline_node', '删除大纲节点', { nodeId: { type: 'string' } }, ['nodeId']),
 
   T('list_characters', '列出角色（含性格与关系）', { workId: { type: 'string' } }, ['workId']),
@@ -123,6 +105,25 @@ const TOOLS = [
   }, ['workId', 'premise']),
   T('ai_detect_clues', '软件 AI 通读全书检测伏笔并入库', { workId: { type: 'string' } }, ['workId']),
   T('ai_gen_storyboards', '软件 AI 为章节生成分镜并入库', { chapterId: { type: 'string' } }, ['chapterId']),
+
+  T('get_story_context', '组装故事上下文（世界书/前情链/角色卡/作者注），查看 AI 将看到什么', {
+    workId: { type: 'string' }, chapterId: { type: 'string', description: '章节ID（可选，提供则含该章扫描与前情链）' },
+  }, ['workId']),
+  T('prepare_ai', '免模型密钥：返回某创作动作组装好的完整 messages（含系统提示词+上下文），agent 用自己的模型执行后写回。工作流：prepare_ai → 自己生成 → append_chapter_content / update_chapter_summary', {
+    chapterId: { type: 'string' },
+    action: { type: 'string', enum: ['continue', 'polish', 'expand', 'summary', 'review'], description: 'continue=续写 polish=润色(需selection) expand=扩写(需selection) summary=记忆摘要 review=审稿' },
+    instruction: { type: 'string', description: '补充要求（可选）' },
+    selection: { type: 'string', description: 'polish/expand 必填：要处理的文字' },
+  }, ['chapterId', 'action']),
+  T('prepare_outline', '免模型密钥：返回大纲动作的完整 messages（叙事引擎方法论+既有设定）', {
+    workId: { type: 'string' }, premise: { type: 'string' }, chapterCount: { type: 'number' },
+  }, ['workId', 'premise']),
+  T('append_chapter_content', '向章节追加正文（纯文本自动转段落 HTML），外部 agent 写回创作结果的入口', {
+    chapterId: { type: 'string' }, text: { type: 'string' },
+  }, ['chapterId', 'text']),
+  T('update_chapter_summary', '写入/清空章节记忆摘要（供后续章节 AI 前情链使用）', {
+    chapterId: { type: 'string' }, summary: { type: 'string', description: '传空字符串清空' },
+  }, ['chapterId', 'summary']),
 
   T('export_work', '导出作品为文件（savePath 传绝对路径）', {
     workId: { type: 'string' },
@@ -261,12 +262,6 @@ async function callTool(name, args) {
     case 'write_chapter': return req('PUT', `/api/chapters/${args.chapterId}/content`, { content: args.content });
     case 'delete_chapter': return req('DELETE', `/api/chapters/${args.chapterId}`);
     case 'get_outline': return req('GET', `/api/works/${args.workId}/outline`);
-    case 'create_outline_node': return req('POST', `/api/works/${args.workId}/outline`, args);
-    case 'create_outline_batch': return req('POST', `/api/works/${args.workId}/outline/batch`, args);
-    case 'update_outline_node': {
-      const { nodeId, ...body } = args;
-      return req('PUT', `/api/outline/${nodeId}`, body);
-    }
     case 'delete_outline_node': return req('DELETE', `/api/outline/${args.nodeId}`);
     case 'list_characters': return req('GET', `/api/works/${args.workId}/characters`);
     case 'create_character': return req('POST', `/api/works/${args.workId}/characters`, args);
@@ -289,6 +284,11 @@ async function callTool(name, args) {
     case 'ai_gen_scenes': return req('POST', '/api/ai/scenes', args);
     case 'ai_detect_clues': return req('POST', `/api/ai/detect-clues/${args.workId}`);
     case 'ai_gen_storyboards': return req('POST', `/api/ai/storyboards/${args.chapterId}`);
+    case 'get_story_context': return req('GET', `/api/ai/context/${args.workId}` + (args.chapterId ? `?chapterId=${args.chapterId}` : ''));
+    case 'prepare_ai': return req('POST', `/api/ai/prepare/${args.chapterId}`, { action: args.action, instruction: args.instruction || '', selection: args.selection });
+    case 'prepare_outline': return req('POST', '/api/ai/prepare-outline', { workId: args.workId, premise: args.premise, chapterCount: args.chapterCount });
+    case 'append_chapter_content': return req('POST', `/api/chapters/${args.chapterId}/append`, { text: args.text });
+    case 'update_chapter_summary': return req('PUT', `/api/chapters/${args.chapterId}/summary`, { summary: args.summary });
     case 'export_work': return req('POST', '/api/export', args);
     case 'import_text': return req('POST', '/api/import', args);
     case 'list_chapter_versions': return req('GET', `/api/chapters/${args.chapterId}/versions`);
@@ -331,7 +331,7 @@ async function handle(msg) {
         reply({
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'creative-studio', version: '0.3.1' },
+          serverInfo: { name: 'creative-studio', version: '0.4.0' },
         });
         break;
       case 'notifications/initialized':

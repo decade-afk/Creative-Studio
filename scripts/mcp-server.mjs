@@ -106,6 +106,25 @@ const TOOLS = [
   T('ai_detect_clues', '软件 AI 通读全书检测伏笔并入库', { workId: { type: 'string' } }, ['workId']),
   T('ai_gen_storyboards', '软件 AI 为章节生成分镜并入库', { chapterId: { type: 'string' } }, ['chapterId']),
 
+  T('get_story_context', '组装故事上下文（世界书/前情链/角色卡/作者注），查看 AI 将看到什么', {
+    workId: { type: 'string' }, chapterId: { type: 'string', description: '章节ID（可选，提供则含该章扫描与前情链）' },
+  }, ['workId']),
+  T('prepare_ai', '免模型密钥：返回某创作动作组装好的完整 messages（含系统提示词+上下文），agent 用自己的模型执行后写回。工作流：prepare_ai → 自己生成 → append_chapter_content / update_chapter_summary', {
+    chapterId: { type: 'string' },
+    action: { type: 'string', enum: ['continue', 'polish', 'expand', 'summary', 'review'], description: 'continue=续写 polish=润色(需selection) expand=扩写(需selection) summary=记忆摘要 review=审稿' },
+    instruction: { type: 'string', description: '补充要求（可选）' },
+    selection: { type: 'string', description: 'polish/expand 必填：要处理的文字' },
+  }, ['chapterId', 'action']),
+  T('prepare_outline', '免模型密钥：返回大纲动作的完整 messages（叙事引擎方法论+既有设定）', {
+    workId: { type: 'string' }, premise: { type: 'string' }, chapterCount: { type: 'number' },
+  }, ['workId', 'premise']),
+  T('append_chapter_content', '向章节追加正文（纯文本自动转段落 HTML），外部 agent 写回创作结果的入口', {
+    chapterId: { type: 'string' }, text: { type: 'string' },
+  }, ['chapterId', 'text']),
+  T('update_chapter_summary', '写入/清空章节记忆摘要（供后续章节 AI 前情链使用）', {
+    chapterId: { type: 'string' }, summary: { type: 'string', description: '传空字符串清空' },
+  }, ['chapterId', 'summary']),
+
   T('export_work', '导出作品为文件（savePath 传绝对路径）', {
     workId: { type: 'string' },
     format: { type: 'string', enum: ['txt', 'markdown', 'html', 'word', 'epub', 'script'] },
@@ -265,6 +284,11 @@ async function callTool(name, args) {
     case 'ai_gen_scenes': return req('POST', '/api/ai/scenes', args);
     case 'ai_detect_clues': return req('POST', `/api/ai/detect-clues/${args.workId}`);
     case 'ai_gen_storyboards': return req('POST', `/api/ai/storyboards/${args.chapterId}`);
+    case 'get_story_context': return req('GET', `/api/ai/context/${args.workId}` + (args.chapterId ? `?chapterId=${args.chapterId}` : ''));
+    case 'prepare_ai': return req('POST', `/api/ai/prepare/${args.chapterId}`, { action: args.action, instruction: args.instruction || '', selection: args.selection });
+    case 'prepare_outline': return req('POST', '/api/ai/prepare-outline', { workId: args.workId, premise: args.premise, chapterCount: args.chapterCount });
+    case 'append_chapter_content': return req('POST', `/api/chapters/${args.chapterId}/append`, { text: args.text });
+    case 'update_chapter_summary': return req('PUT', `/api/chapters/${args.chapterId}/summary`, { summary: args.summary });
     case 'export_work': return req('POST', '/api/export', args);
     case 'import_text': return req('POST', '/api/import', args);
     case 'list_chapter_versions': return req('GET', `/api/chapters/${args.chapterId}/versions`);
@@ -307,7 +331,7 @@ async function handle(msg) {
         reply({
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'creative-studio', version: '0.3.0' },
+          serverInfo: { name: 'creative-studio', version: '0.4.0' },
         });
         break;
       case 'notifications/initialized':

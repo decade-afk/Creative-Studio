@@ -15,6 +15,7 @@
 // 模块声明
 mod ai;
 mod agent_api;
+mod context;
 mod submission;
 mod export;
 mod validation;
