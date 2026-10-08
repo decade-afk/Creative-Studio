@@ -7,9 +7,13 @@
  * 调用软件内置 AI 工作流（续写/审稿/摘要/大纲/角色/场景/伏笔检测/分镜），
  * 导出六格式、导入 TXT、版本快照、投递台账、全局搜索。
  *
- * 【前提】Creative Studio 桌面应用正在运行（Agent API 监听 127.0.0.1:8765）
- * 【环境变量】CS_API_BASE 可覆盖 API 地址
+ * 【自动拉起】API 不在线时自动启动 Creative Studio 并等待就绪（最多 40s）
+ * 【环境变量】CS_API_BASE 可覆盖 API 地址；CS_APP_PATH 可指定应用 exe 路径
  */
+
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 const API_BASE = process.env.CS_API_BASE || 'http://127.0.0.1:8765';
 
@@ -122,7 +126,76 @@ const TOOLS = [
   T('work_stats', '作品统计（章节数/总字数）', { workId: { type: 'string' } }, ['workId']),
 ];
 
+/** 探测 API 是否在线（任何 HTTP 响应都算在线，包括 5xx——5xx 说明服务在但 DB 可能未初始化） */
+async function apiOnline(timeoutMs = 2000) {
+  try {
+    await fetch(API_BASE + '/api/works', { signal: AbortSignal.timeout(timeoutMs) });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** API 是否就绪（200：数据库已初始化可正常服务） */
+async function apiReady(timeoutMs = 2000) {
+  try {
+    const r = await fetch(API_BASE + '/api/works', { signal: AbortSignal.timeout(timeoutMs) });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** 候选应用路径（按优先级）：环境变量 > release > debug > 常见安装位置 */
+function findAppExe() {
+  const candidates = [];
+  if (process.env.CS_APP_PATH) candidates.push(process.env.CS_APP_PATH);
+  // 本仓库构建产物
+  candidates.push('D:/Code/创作中心/src-tauri/target/release/creative-studio-desktop.exe');
+  candidates.push('D:/Code/创作中心/src-tauri/target/debug/creative-studio-desktop.exe');
+  // NSIS 默认安装位置（CurrentUser / AllUsers）
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+  if (home) {
+    candidates.push(home + '/AppData/Local/Programs/Creative Studio/Creative Studio.exe');
+    candidates.push(home + '/AppData/Local/Creative Studio/Creative Studio.exe');
+  }
+  candidates.push('C:/Program Files/Creative Studio/Creative Studio.exe');
+  return candidates.find((p) => { try { return existsSync(p); } catch { return false; } }) || null;
+}
+
+/**
+ * 确保 API 在线；不在线则拉起应用并等待就绪
+ * 每个工具调用前调用；就绪后本次会话内短路（30s 内不重复探测启动流程）
+ */
+let lastReadyAt = 0;
+async function ensureApiOnline() {
+  if (await apiReady()) { lastReadyAt = Date.now(); return; }
+  if (Date.now() - lastReadyAt < 30000 && await apiReady(500)) return;
+
+  const exe = findAppExe();
+  if (!exe) {
+    throw new Error('Creative Studio 未运行且未找到应用路径。请启动应用，或设置环境变量 CS_APP_PATH 指向 creative-studio-desktop.exe / Creative Studio.exe');
+  }
+  // detached 启动：不阻塞 agent，不继承 stdio
+  const child = spawn(exe, [], { detached: true, stdio: 'ignore', windowsHide: false });
+  child.unref();
+
+  // 阶段一：等 API 进程在线（应用启动 → axum 监听，任何 HTTP 响应都算）
+  for (let i = 0; i < 30; i++) {
+    if (await apiOnline(1200)) break;
+    await new Promise((r) => setTimeout(r, 1000));
+    if (i === 29) throw new Error(`已启动 ${exe} 但 API 30 秒内未监听`);
+  }
+  // 阶段二：等数据库就绪（前端初始化建表后 /api/works 返回 200）
+  for (let i = 0; i < 30; i++) {
+    if (await apiReady(1500)) { lastReadyAt = Date.now(); return; }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+  throw new Error('API 已在线但数据库 30 秒内未初始化（应用窗口是否正常打开？）');
+}
+
 async function callTool(name, args) {
+  await ensureApiOnline();
   const req = (method, path, body) =>
     fetch(API_BASE + path, {
       method,
