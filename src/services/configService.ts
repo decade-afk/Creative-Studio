@@ -107,7 +107,7 @@ export interface AppConfig {
  * 默认配置
  */
 const DEFAULT_CONFIG: AppConfig = {
-  version: '0.2.0',
+  version: '0.3.0',
   theme: 'auto',
   editor: {
     fontSize: 16,
