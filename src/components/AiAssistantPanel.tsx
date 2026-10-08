@@ -23,23 +23,26 @@ import {
   aiTestConnection,
   buildContinueMessages,
   buildPolishMessages,
+  buildExpandMessages,
   buildSummaryMessages,
   buildReviewMessages,
   textToParagraphHtml,
   type AiConfig,
 } from '../services/aiService';
-import { saveChapterVersion } from '../services/chapterService';
+import { saveChapterVersion, updateChapter } from '../services/chapterService';
 import { copyText } from '../services/copyService';
+import { assembleStoryContext, renderContextBlock } from '../services/contextAssembly';
 
 /** 动作类型 */
-export type AiAction = 'continue' | 'polish' | 'summary' | 'review';
+export type AiAction = 'continue' | 'polish' | 'expand' | 'summary' | 'review';
 
 /** 动作元信息 */
 const ACTION_META: Record<AiAction, { label: string; icon: string; hint: string }> = {
-  continue: { label: '续写', icon: '✍️', hint: '根据正文结尾继续写作' },
+  continue: { label: '续写', icon: '✍️', hint: '结合前情/设定/角色，从正文结尾继续写作' },
   polish: { label: '润色', icon: '✨', hint: '改写选中的文字（未选中则处理当前章节）' },
-  summary: { label: '摘要', icon: '📋', hint: '生成本章故事梗概' },
-  review: { label: '审稿', icon: '🔍', hint: '检查逻辑、时间线、人物一致性与伏笔' },
+  expand: { label: '扩写', icon: '📈', hint: '给选中文字增加事件与波折，一波三折（需选中）' },
+  summary: { label: '摘要', icon: '📋', hint: '生成本章记忆摘要并存档，供后续章节续写引用' },
+  review: { label: '审稿', icon: '🔍', hint: '逻辑/时间线/人物一致性/连载节奏/伏笔/AI味' },
 };
 
 interface AiAssistantPanelProps {
@@ -55,6 +58,7 @@ interface AiAssistantPanelProps {
 export default function AiAssistantPanel({ editorRef, onClose }: AiAssistantPanelProps) {
   const { showToast } = useToast();
   const currentChapterId = useWriterStore((state) => state.currentChapterId);
+  const currentWorkId = useWriterStore((state) => state.currentWorkId);
   const chapters = useWriterStore((state) => state.chapters);
 
   const [config, setConfig] = useState<AiConfig | null>(null);
@@ -117,28 +121,47 @@ export default function AiAssistantPanel({ editorRef, onClose }: AiAssistantPane
       return;
     }
 
+    // 组装上下文（故事背景/前情记忆/角色卡/世界书/作者注），失败自动降级
+    let contextBlock = '';
+    try {
+      const ctx = await assembleStoryContext(currentWorkId, currentChapterId, editorPlainTail());
+      contextBlock = renderContextBlock(ctx);
+    } catch {
+      // 无上下文也能继续（纯尾部续写模式）
+    }
+
     // 组装消息
     let messages;
     try {
       switch (action) {
         case 'continue':
-          messages = buildContinueMessages(editorPlainTail(), instruction.trim() || undefined);
+          messages = buildContinueMessages(editorPlainTail(), instruction.trim() || undefined, contextBlock);
           break;
         case 'polish': {
           const selection = getSelectionHtml();
           if (selection) {
-            messages = buildPolishMessages(selection, instruction.trim() || undefined);
+            messages = buildPolishMessages(selection, instruction.trim() || undefined, contextBlock);
           } else {
             showToast('润色需要先在正文中选中一段文字', 'info');
             return;
           }
           break;
         }
+        case 'expand': {
+          const selection = getSelectionHtml();
+          if (selection) {
+            messages = buildExpandMessages(selection, instruction.trim() || undefined, contextBlock);
+          } else {
+            showToast('扩写需要先在正文中选中一段文字', 'info');
+            return;
+          }
+          break;
+        }
         case 'summary':
-          messages = buildSummaryMessages(currentChapter.title, editorPlainTail());
+          messages = buildSummaryMessages(currentChapter.title, editorPlainTail(), contextBlock);
           break;
         case 'review':
-          messages = buildReviewMessages(currentChapter.title, editorPlainTail());
+          messages = buildReviewMessages(currentChapter.title, editorPlainTail(), contextBlock);
           break;
       }
     } catch (error: any) {
@@ -151,7 +174,7 @@ export default function AiAssistantPanel({ editorRef, onClose }: AiAssistantPane
     abortRef.current = false;
 
     // 改写类动作前先快照，AI 内容覆盖前可回退
-    if (action === 'continue' || action === 'polish') {
+    if (action === 'continue' || action === 'polish' || action === 'expand') {
       try {
         await saveChapterVersion(currentChapterId, `AI ${ACTION_META[action].label}前`);
       } catch {
@@ -183,6 +206,16 @@ export default function AiAssistantPanel({ editorRef, onClose }: AiAssistantPane
       setRunning(false);
       requestIdRef.current = null;
     }
+
+    // 摘要成功生成后落库到 chapters.summary，供后续章节的前情记忆链使用
+    if (action === 'summary' && accumulated.trim() && currentChapterId) {
+      try {
+        await updateChapter(currentChapterId, { summary: accumulated.trim() });
+        showToast('本章记忆已保存，后续章节续写时会自动携带', 'success');
+      } catch {
+        // 摘要落库失败不影响结果展示
+      }
+    }
     // showToast / loadConfig 稳定，currentChapter 随 store 变化
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config, action, instruction, currentChapter, currentChapterId]);
@@ -210,11 +243,11 @@ export default function AiAssistantPanel({ editorRef, onClose }: AiAssistantPane
       return;
     }
 
-    // 润色：替换选区；续写：追加到光标处/文末
+    // 润色/扩写：替换选区；续写：追加到光标处/文末
     const selection = window.getSelection();
     const html = textToParagraphHtml(output);
 
-    if (action === 'polish' && selection && selection.rangeCount > 0 && editor.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+    if ((action === 'polish' || action === 'expand') && selection && selection.rangeCount > 0 && editor.contains(selection.getRangeAt(0).commonAncestorContainer)) {
       const range = selection.getRangeAt(0);
       range.deleteContents();
       const fragment = range.createContextualFragment(html);
@@ -225,7 +258,7 @@ export default function AiAssistantPanel({ editorRef, onClose }: AiAssistantPane
 
     // 触发 input 事件让自动保存与字数统计生效
     editor.dispatchEvent(new Event('input', { bubbles: true }));
-    showToast(`已${action === 'polish' ? '替换选区' : '插入正文'}，可随时从版本历史恢复`, 'success');
+    showToast(`已${action === 'polish' ? '替换选区' : action === 'expand' ? '替换为扩写结果' : '插入正文'}，可随时从版本历史恢复`, 'success');
   }, [action, output, editorRef, showToast]);
 
   /** 测试连接 */

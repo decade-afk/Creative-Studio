@@ -185,7 +185,7 @@ export default function WriterTopBar({
         )}
 
         {totalWords !== null && (
-          <span className="hidden min-[1000px]:inline text-xs text-on-surface-secondary whitespace-nowrap">
+          <span className="hidden min-[1000px]:block max-w-[240px] truncate text-xs text-on-surface-secondary">
             本章 {wordCount} 字 · 全书 {totalWords} 字
             {dailyGoal > 0 && (
               <span className={todayWords >= dailyGoal ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
@@ -220,8 +220,8 @@ export default function WriterTopBar({
         </span>
       </div>
 
-      {/* 右侧：操作按钮 */}
-      <div className="flex items-center gap-4">
+      {/* 右侧：操作按钮（不收缩，左侧面包屑/字数负责弹性截断） */}
+      <div className="flex items-center gap-4 shrink-0">
         <div className="flex items-center gap-2">
           {/* 版本历史 */}
           <button

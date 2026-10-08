@@ -67,6 +67,9 @@ export interface Chapter {
   /** 章节顺序（从1开始） */
   order: number;
 
+  /** 章节记忆摘要（AI 生成，用于后续章节的前情上下文） */
+  summary: string;
+
   /** 创建时间 (ISO 8601) */
   created_at: string;
 

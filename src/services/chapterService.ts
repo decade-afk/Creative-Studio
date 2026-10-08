@@ -51,6 +51,7 @@ export async function createChapter(
     title,
     content,
     order: chapterOrder,
+    summary: '',
     created_at: getCurrentTimestamp(),
     updated_at: getCurrentTimestamp(),
     synced_at: null,
@@ -104,6 +105,7 @@ export async function getChaptersByWorkId(
     title: string;
     content: string;
     chapter_order: number;
+    summary: string;
     created_at: string;
     updated_at: string;
     synced_at: string | null;
@@ -116,6 +118,7 @@ export async function getChaptersByWorkId(
     title: row.title,
     content: row.content,
     order: row.chapter_order,
+    summary: row.summary || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
     synced_at: row.synced_at,
@@ -141,6 +144,7 @@ export async function getChapterById(id: string): Promise<Chapter | null> {
     title: string;
     content: string;
     chapter_order: number;
+    summary: string;
     created_at: string;
     updated_at: string;
     synced_at: string | null;
@@ -161,6 +165,7 @@ export async function getChapterById(id: string): Promise<Chapter | null> {
     title: row.title,
     content: row.content,
     order: row.chapter_order,
+    summary: row.summary || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
     synced_at: row.synced_at,
@@ -177,7 +182,7 @@ export async function getChapterById(id: string): Promise<Chapter | null> {
  */
 export async function updateChapter(
   id: string,
-  updates: Partial<Pick<Chapter, 'title' | 'content' | 'order'>>
+  updates: Partial<Pick<Chapter, 'title' | 'content' | 'order' | 'summary'>>
 ): Promise<boolean> {
   const db = await getDatabase();
 
@@ -198,6 +203,11 @@ export async function updateChapter(
   if (updates.order !== undefined) {
     updateFields.push(`chapter_order = $${paramIndex++}`);
     params.push(updates.order);
+  }
+
+  if (updates.summary !== undefined) {
+    updateFields.push(`summary = $${paramIndex++}`);
+    params.push(updates.summary);
   }
 
   if (updateFields.length === 0) {

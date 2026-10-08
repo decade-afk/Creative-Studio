@@ -20,6 +20,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { STYLE_PRESETS } from './contextAssembly';
 
 // ============================================================================
 // 类型定义
@@ -275,12 +276,42 @@ export async function aiTestConnection(config: AiConfig): Promise<string> {
 // 创作动作（内置提示词）
 // ============================================================================
 
-/** 中文创作系统提示词 */
-const WRITER_SYSTEM_PROMPT = `你是一位专业的中文小说与剧本创作助手，擅长长篇连载、短篇、剧本与分镜创作。
-要求：
-- 输出为简体中文正文，风格与用户提供的上下文保持一致
-- 直接输出创作内容本身，不要输出解释、前言或总结
-- 使用 <p></p> 段落标签组织正文，保持简洁排版`;
+/**
+ * 中文创作系统提示词（v2）
+ *
+ * 融合多家开源项目的写作方法论：
+ * - inkos long-writing：场景要有即时目标-阻力-转折-后果；对话承压；
+ *   因果归属（禁止巧合解局）；每段都要改变至少一条叙事轴
+ * - inkos story-deslop：语义级去AI味诊断（不靠禁词表，靠功能判断）
+ * - 网文创作共识：直接呈现不解释、少用心理独白代替事件
+ */
+const WRITER_SYSTEM_PROMPT = `你是一位深耕中文长篇叙事的写作者，任务是输出可以直接放进书里的正文。
+
+写法要求：
+- 用场景讲故事：每个段落通过行动、对话、感官细节、选择或后果推进，不写梗概式叙述，不做旁白分析
+- 展示而非标签：情绪用具体反应呈现（动作、停顿、语气），不直接下"他很紧张""她很伤心"这类结论
+- 对话承压：每句有分量的对话都要改变局面——透露信息、施加压力、欠下人情或逼出选择；删掉只为交换信息的寒暄
+- 因果归属：转折来自人物在约束下做的选择，不用巧合、无来由的巧合相遇或对手降智解局
+- 每段有增量：至少改变一条叙事轴（事情进展、认知、关系、处境、资源、危险），删掉纯填充
+- 文笔：多用具体动词与可观察反应，句子节奏贴合场景的物理与情绪运动；比喻服务表达而非装饰
+
+禁止（AI 味来源，审查到即改写）：
+- 禁止总结式结尾、上价值说教、人生感悟收束——停在动作、画面、选择或情绪余波上
+- 禁止对已演示的情绪再做一遍解释；禁止"深吸一口气"式的空转缓冲（有功能就改成角色当下动作）
+- 禁止套话模板："眼中闪过一丝X"（→ 写"他垂下眼/眯起眼"）、"嘴角勾起一抹X"（→ 写"他嘴角一扯/乐了"）
+- 禁止虚词缓冲："一丝/一抹/一缕"+情绪、"不禁/竟然/不由得/仿佛"当口头禅——删掉缓冲词让动作直接发生
+- 禁止对比定义句式："他要的不是X而是Y""这不是结束而是开始"——用一个具体动作或选择呈现
+- 禁止四字成语堆砌充当描写（"惊心动魄、险象环生、千钧一发"）——换成一个具体动作或画面
+- 禁止对称排比句式、三段式套话；禁止群众整齐划一反应（"所有人都倒吸一口凉气"）
+
+输出格式：
+- 直接输出正文本身，不输出解释、前言、总结或标题
+- 使用 <p></p> 段落标签组织正文`;
+
+/** 从风格预设 ID 取提示词（配置层可能的非法值退化为默认） */
+export function getStylePresetPrompt(presetId: string): string {
+  return STYLE_PRESETS[presetId]?.prompt || '';
+}
 
 /** 提取 HTML 中的纯文本（保留段落换行） */
 function htmlToPlainText(html: string): string {
@@ -309,43 +340,108 @@ export function textToParagraphHtml(text: string): string {
  * 构建各创作动作的消息列表
  */
 
-/** 续写：基于正文结尾续写一段 */
-export function buildContinueMessages(contextTail: string, instruction?: string): AiMessage[] {
+/**
+ * 续写：故事上下文（背景/前情/角色/设定/作者注）+ 正文结尾 → 续写一段
+ * contextBlock 由 contextAssembly.assembleStoryContext + renderContextBlock 生成
+ */
+export function buildContinueMessages(
+  contextTail: string,
+  instruction?: string,
+  contextBlock?: string
+): AiMessage[] {
   const plain = htmlToPlainText(contextTail).slice(-3000);
+  const userParts: string[] = [];
+  if (contextBlock) userParts.push(contextBlock);
+  if (instruction) userParts.push(`【补充要求】\n${instruction}`);
+  // 正文语态文字放在末尾（末位效应）：动笔前最后读到的是正文，避免被设定/大纲的语言污染文风
+  userParts.push(
+    `接着下面的正文自然续写 400-700 字。衔接处与已有文本的语汇、节奏、氛围保持一致，可以写少量过渡让承接自然，但不复述已覆盖的事件、不重新描写已出现的细节。先明确这一段要完成的 1-3 个节拍（目标-阻力-转折），再动笔：\n\n【正文结尾】\n${plain}`
+  );
   return [
     { role: 'system', content: WRITER_SYSTEM_PROMPT },
-    {
-      role: 'user',
-      content: `请接着下面的正文自然续写 300-500 字，保持人物、语气与叙事节奏连贯，不要重复已有内容：\n\n【正文结尾】\n${plain}${
-        instruction ? `\n\n【补充要求】\n${instruction}` : ''
-      }`,
-    },
+    { role: 'user', content: userParts.join('\n\n') },
   ];
 }
 
-/** 润色：改写选中内容 */
-export function buildPolishMessages(selection: string, instruction?: string): AiMessage[] {
+/**
+ * 润色：inkos 语义级清理 —— 按功能诊断而非禁词替换，保留作者声音
+ */
+export function buildPolishMessages(
+  selection: string,
+  instruction?: string,
+  contextBlock?: string
+): AiMessage[] {
   return [
     { role: 'system', content: WRITER_SYSTEM_PROMPT },
     {
       role: 'user',
-      content: `请润色下面的文字：修正语病、提升文采、增强画面感，保持原意与篇幅接近，直接输出润色后的全文：\n\n【原文】\n${htmlToPlainText(
+      content: `${contextBlock ? contextBlock + '\n\n' : ''}请修订下面的文字。逐段自问：
+1. 这段要完成什么叙事功能？功能是否通过行动/画面/证据可见？
+2. 叙述者是否解释了已经演示出来的情绪？删掉解释，保留演示
+3. 这句话换成任何角色任何书都成立吗？成立就改写到只属于此场景
+4. 对话有动机吗？伪装成对话的说明要么给动机要么改叙述
+5. 节奏是否贴合场景的运动？
+
+保留情节事实、人物声音与有力的原句，只修病灶；篇幅与原文接近，直接输出修订后的全文：\n\n【原文】\n${htmlToPlainText(
         selection
       )}${instruction ? `\n\n【补充要求】\n${instruction}` : ''}`,
     },
   ];
 }
 
-/** 摘要：生成章节梗概 */
-export function buildSummaryMessages(chapterTitle: string, chapterHtml: string): AiMessage[] {
+/**
+ * 摘要：生成"状态投影"式章节记忆（inkos state-projection）——
+ * 输出的摘要会存入 chapters.summary，作为后续章节 AI 请求的前情链
+ */
+export function buildSummaryMessages(
+  chapterTitle: string,
+  chapterHtml: string,
+  contextBlock?: string
+): AiMessage[] {
   return [
     {
       role: 'system',
-      content: '你是专业的中文编辑，擅长提炼故事梗概。直接输出摘要内容，不要前言。',
+      content:
+        '你是长篇小说的连续性编辑，负责为已完成的章节生成"记忆摘要"。摘要供作者续写后续章节时做前情参考，事实必须来自本章，不得推测。直接输出摘要，不要前言。',
     },
     {
       role: 'user',
-      content: `请为章节「${chapterTitle}」生成 150 字以内的故事梗概，涵盖关键事件、人物动机与结尾悬念：\n\n${htmlToPlainText(
+      content: `请为章节「${chapterTitle}」生成 200 字以内的记忆摘要，按以下要素选取本章**新建立/新变化**的事实：
+- 关键事件（谁做了什么，导致什么后果）
+- 人物状态与关系变化（含每人**知道了什么/不知道什么**）
+- 新出现的地点、物品、规则、称谓
+- 未解决的悬念与新埋的伏笔
+只记录确定的、可被后续章节引用的事实：\n\n${htmlToPlainText(chapterHtml).slice(0, 8000)}${
+        contextBlock ? `\n\n【既有设定参考】\n${contextBlock}` : ''
+      }`,
+    },
+  ];
+}
+
+/**
+ * 审稿：结构化审校 + 长篇一致性专项（融合 inkos 审稿与连续性检查）
+ */
+export function buildReviewMessages(
+  chapterTitle: string,
+  chapterHtml: string,
+  contextBlock?: string
+): AiMessage[] {
+  return [
+    {
+      role: 'system',
+      content: `你是严格而专业的中文小说审稿编辑。按以下分类输出审稿意见（纯文本，短横线列表，每条引用原文短语定位）：
+【逻辑硬伤】情节自相矛盾、因果不成立之处；特别检查：是否有巧合解局、对手无故降智、人物知道了他不该知道的信息
+【时间线】时间顺序、时长、事件发生与被发现的时间是否混乱
+【人物一致性】言行、性格、称谓前后不一致；人物反应是否符合其动机与处境；配角是否只按主角需要行动而没有自己的利益逻辑
+【叙事效率】梗概式叙述替代场景、重复解释、无信息增量的段落
+【连载节奏】开篇是否尽快进入压力事件（而非背景铺陈）；千字内有无情绪起伏点；章尾钩子是落在材料性变化/新压力上，还是总结式收尾（"就这样…""他终于明白…"）
+【伏笔与悬念】已埋伏笔、未回收的悬念、本章新埋钩子是否清晰
+【文笔建议】具体到句子的修改建议（AI味专项：总结腔、对称排比、情绪标签化、"一丝/一抹"缓冲词、成语堆砌）
+仅列出确实存在的问题；若某类没有问题，写"无明显问题"。`,
+    },
+    {
+      role: 'user',
+      content: `${contextBlock ? contextBlock + '\n\n' : ''}请审稿章节「${chapterTitle}」：\n\n${htmlToPlainText(
         chapterHtml
       ).slice(0, 8000)}`,
     },
@@ -353,42 +449,61 @@ export function buildSummaryMessages(chapterTitle: string, chapterHtml: string):
 }
 
 /**
- * 审稿：inkos 式的结构化审校
- * 输出按 逻辑硬伤 / 时间线 / 人物一致性 / 伏笔与悬念 / 文笔建议 分类
+ * 大纲生成：叙事引擎方法论（inkos foundation-design）——
+ * 表线（可见的 foreground story）由里线（background causal story）驱动，
+ * 每卷有可观察的终态与不可逆变化，钩子区分休眠与激活
  */
-export function buildReviewMessages(chapterTitle: string, chapterHtml: string, outlineContext?: string): AiMessage[] {
+export function buildOutlineMessages(
+  premise: string,
+  chapterCount: number,
+  contextBlock?: string
+): AiMessage[] {
   return [
     {
       role: 'system',
-      content: `你是严格而专业的中文小说审稿编辑。按以下分类输出审稿意见（纯文本，可用短横线列表）：
-【逻辑硬伤】情节自相矛盾、因果不成立之处
-【时间线】时间顺序或时长不合理之处
-【人物一致性】言行、性格、称谓前后不一致之处
-【伏笔与悬念】已埋伏笔、未回收的悬念、建议
-【文笔建议】具体到句子的修改建议
-仅列出确实存在的问题并引用原文短语定位；若某类没有问题，写"无明显问题"。`,
+      content: `你是专业的长篇故事策划。设计大纲时遵循：
+- 叙事引擎：找到主题压力与不可调和的动机冲突，让可见的前台故事由更深的后台因果驱动；对手要有自己的利益逻辑，不是主角的送件人
+- 分卷思维：每一卷有独立的戏剧目的、可观察的终态和一次不可逆的变化；短期钩子挂到全书主线上
+- 人物弧光：主角有具体的起点状态、内/外目的地和必须支付的代价；配角有独立理由去合作、抵抗、误读或离开
+- 钩子管理：区分"已激活的钩子"与"休眠的未来种子"；承重钩子只留少数几个，其余按需休眠
+- 开篇契约：第一章用具体的扰动/风险/未解事实建立阅读压力，第二章让主角的独特杠杆可见地用一次，第三章让短期目标清晰可辨
+直接输出大纲内容，不要前言与总结。`,
     },
     {
       role: 'user',
-      content: `请审稿章节「${chapterTitle}」：\n\n${htmlToPlainText(chapterHtml).slice(0, 8000)}${
-        outlineContext ? `\n\n【大纲参考】\n${outlineContext}` : ''
-      }`,
+      content: `基于以下创意生成 ${chapterCount} 章的故事大纲。每章一段，格式为：
+第N章 标题：章节梗概（谁要什么、什么阻力、如何转折）[伏笔：埋设X/回收Y/强化Z，无则写"无"]（章末钩子一句话）
+要求：
+- 每章梗概必须包含至少一条叙事轴的推进（事情/认知/关系/处境）
+- 章末钩子落在材料性变化或新压力上，不用机械悬念公式
+- 合理安排悬念节奏：每 3-5 章构成一个张弛单元，紧后要有缓冲
+- 主要人物要有独立动机，反派按自己的利益行动
+
+【创意】
+${premise}${contextBlock ? `\n\n【既有设定】\n${contextBlock}` : ''}`,
     },
   ];
 }
 
 /**
- * 大纲生成：从一句话创意生成章节大纲
+ * 扩写：Long-Novel-GPT 式的波折扩充——不注水，靠增加具体事件与阻力拉出波澜
  */
-export function buildOutlineMessages(premise: string, chapterCount: number): AiMessage[] {
+export function buildExpandMessages(
+  selection: string,
+  instruction?: string,
+  contextBlock?: string
+): AiMessage[] {
   return [
-    {
-      role: 'system',
-      content: '你是专业的故事策划。直接输出大纲内容，不要前言与总结。',
-    },
+    { role: 'system', content: WRITER_SYSTEM_PROMPT },
     {
       role: 'user',
-      content: `基于以下创意生成 ${chapterCount} 章的故事大纲。每章一段，格式为"第N章 标题：200字以内的章节梗概（起因、冲突、钩子）"。\n\n【创意】\n${premise}`,
+      content: `${contextBlock ? contextBlock + '\n\n' : ''}请扩充下面的文字：在原有走向中引入更多具体事件、阻力与反应，使其一波三折、跌宕起伏，更有故事性。
+注意：
+- 扩的是"事件与变化"，不是形容词语气词的注水；每处新增内容都要有叙事功能
+- 保留原文的关键事实与结局走向，篇幅可为原文的 1.5-3 倍
+- 直接输出扩充后的全文：\n\n【原文】\n${htmlToPlainText(selection)}${
+        instruction ? `\n\n【补充要求】\n${instruction}` : ''
+      }`,
     },
   ];
 }

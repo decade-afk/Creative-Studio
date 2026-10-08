@@ -30,6 +30,7 @@ import {
   type AppConfig,
 } from '../services/configService';
 import { getCurrentStorageDir, isDefaultLocation, pickStorageDir, migrateStorage, resetToDefault } from '../services/storageService';
+import { STYLE_PRESETS } from '../services/contextAssembly';
 import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   createBackup,
@@ -1315,6 +1316,42 @@ function AiTab({ config, setConfig }: AiTabProps) {
             onChange={(e) => updateAi({ maxTokens: parseInt(e.target.value) || 2048 })}
             className="form-input"
           />
+        </div>
+      </div>
+
+      {/* 风格预设与作者注：注入所有创作类 AI 请求（KoboldAI Author's Note 思路） */}
+      <div className="max-w-lg space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-on-surface mb-2">风格预设</label>
+          <select
+            value={ai.stylePreset || 'default'}
+            onChange={(e) => updateAi({ stylePreset: e.target.value })}
+            className="form-input"
+          >
+            {Object.entries(STYLE_PRESETS).map(([id, preset]) => (
+              <option key={id} value={id}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-on-surface-secondary mt-1">
+            {STYLE_PRESETS[ai.stylePreset]?.prompt
+              ? STYLE_PRESETS[ai.stylePreset].prompt
+              : '跟随正文自然风格，不做额外约束'}
+          </p>
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-on-surface mb-2">作者注</label>
+          <textarea
+            value={ai.authorNote || ''}
+            onChange={(e) => updateAi({ authorNote: e.target.value })}
+            rows={3}
+            placeholder="贯穿全书的指令，如：主角不要冷幽默，配角老周头口头禅是'就那么回事'，每章结尾留一个未决的小事"
+            className="form-input resize-y"
+          />
+          <p className="text-xs text-on-surface-secondary mt-1">
+            续写、润色、审稿、摘要都会自动携带这段指令与世界书、前情记忆
+          </p>
         </div>
       </div>
 

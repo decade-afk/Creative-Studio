@@ -55,8 +55,9 @@ async function buildDbPath(): Promise<string> {
  * v3: 修复 outline_nodes.parent_id 外键约束
  * v4: 乐观锁 version 字段 + chapter_versions 章节版本快照表
  * v5: submissions 投递台账表
+ * v6: chapters.summary 章节记忆摘要列（AI 上下文组装的前情链数据源）
  */
-const CURRENT_DB_VERSION = 5;
+const CURRENT_DB_VERSION = 6;
 
 /**
  * 获取数据库实例
@@ -196,6 +197,9 @@ async function migrateDatabase(instance: Database, fromVersion: number, toVersio
         break;
       case 5:
         await migrateToV5(instance);
+        break;
+      case 6:
+        await migrateToV6(instance);
         break;
       default:
         throw new Error(`未知的迁移版本: ${version}`);
@@ -809,6 +813,31 @@ async function migrateToV5(instance: Database): Promise<void> {
   `);
 
   console.log('✅ v5 迁移完成（投递台账 + world_settings 兜底）');
+}
+
+/**
+ * 数据库迁移 v5 -> v6
+ * chapters.summary：章节记忆摘要。
+ * AI 摘要动作的结果落库，作为后续章节续写/审稿时"前情记忆链"的数据源
+ * （参考 SillyTavern/KoboldAI 的滚动记忆与 inkos 的状态投影思想）
+ */
+async function migrateToV6(instance: Database): Promise<void> {
+  console.log('🔧 为 chapters 添加 summary 记忆列...');
+
+  // SQLite ALTER TABLE 无 IF NOT EXISTS，先查列是否存在
+  const columns = await instance.select<Array<{ name: string }>>(
+    `PRAGMA table_info(chapters)`
+  );
+  if (!columns.some((c) => c.name === 'summary')) {
+    await instance.execute(
+      `ALTER TABLE chapters ADD COLUMN summary TEXT NOT NULL DEFAULT ''`
+    );
+    console.log('  ✅ chapters.summary 已添加');
+  } else {
+    console.log('  ℹ️ chapters.summary 已存在，跳过');
+  }
+
+  console.log('✅ v6 迁移完成（章节记忆摘要列）');
 }
 
 /**

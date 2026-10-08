@@ -107,6 +107,10 @@ export interface AppConfig {
     temperature: number;
     /** 单次回复最大 token 数 */
     maxTokens: number;
+    /** 作者注：贯穿全书的风格/方向指令，注入所有创作类 AI 请求 */
+    authorNote: string;
+    /** 风格预设 ID（default | casual | drama | humor | suspense | custom） */
+    stylePreset: string;
   };
 
   /** 上次打开的作品ID */
@@ -159,6 +163,8 @@ const DEFAULT_CONFIG: AppConfig = {
     model: 'moonshot-v1-8k',
     temperature: 0.7,
     maxTokens: 2048,
+    authorNote: '',
+    stylePreset: 'default',
   },
   isFirstLaunch: true,
 };

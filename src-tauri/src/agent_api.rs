@@ -67,6 +67,18 @@ fn conn(app: &tauri::AppHandle) -> Result<Connection, String> {
     let c = Connection::open(&path).map_err(|e| format!("打开数据库失败: {}", e))?;
     c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;")
         .map_err(|e| format!("{}", e))?;
+    // 兜底：v6 迁移（chapters.summary）由前端执行；纯 API 冷启动时在此补列
+    let has_summary: i64 = c
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('chapters') WHERE name = 'summary'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    if has_summary == 0 {
+        c.execute_batch("ALTER TABLE chapters ADD COLUMN summary TEXT NOT NULL DEFAULT '';")
+            .ok();
+    }
     Ok(c)
 }
 
@@ -541,6 +553,7 @@ pub fn start(app: &tauri::AppHandle) {
             .route("/api/chapters", axum::routing::post(create_chapter))
             .route("/api/chapters/{id}/content", axum::routing::put(update_chapter_content))
             .route("/api/chapters/{id}/title", axum::routing::put(update_chapter_title))
+            .route("/api/chapters/{id}/summary", axum::routing::put(update_chapter_summary))
             .route("/api/ai/continue/{chapterId}", axum::routing::post(ai_continue))
             .route("/api/ai/review/{chapterId}", axum::routing::post(ai_review))
             .route("/api/ai/outline", axum::routing::post(ai_outline))
@@ -555,6 +568,7 @@ pub fn start(app: &tauri::AppHandle) {
             .route("/api/works/{id}/characters", get(get_characters).post(create_character))
             .route("/api/works/{id}/scenes", get(get_scenes).post(create_scene))
             .route("/api/works/{id}/world-settings", get(get_world_settings).post(create_world_setting))
+            .route("/api/world-settings/{id}", axum::routing::delete(delete_world_setting))
             .route("/api/works/{id}/clues", get(get_clues).post(create_clue))
             .route("/api/clues/{id}/status", axum::routing::put(update_clue_status))
             .route("/api/works/{id}/conflicts", get(get_conflicts).post(create_conflict))
@@ -1451,6 +1465,32 @@ async fn save_chapter_version_api(
 }
 
 /** 更新章节标题（修复重复前缀等场景） */
+async fn delete_world_setting(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let n = db
+        .execute("UPDATE world_settings SET deleted = 1, updated_at = ?1 WHERE id = ?2", rusqlite::params![now(), id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    if n == 0 { return Err((StatusCode::NOT_FOUND, "条目不存在".into())); }
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn update_chapter_summary(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let summary = body["summary"].as_str().ok_or((StatusCode::BAD_REQUEST, "summary 必填".into()))?;
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let n = db
+        .execute("UPDATE chapters SET summary = ?1, updated_at = ?2 WHERE id = ?3 AND deleted = 0", rusqlite::params![summary, now(), id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    if n == 0 { return Err((StatusCode::NOT_FOUND, "章节不存在".into())); }
+    Ok(Json(json!({ "ok": true })))
+}
+
 async fn update_chapter_title(
     axum::extract::State(app): axum::extract::State<AppState>,
     Path(id): Path<String>,
