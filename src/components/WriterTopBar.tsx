@@ -160,7 +160,7 @@ export default function WriterTopBar({
         <button
           onClick={() => setOpenMenu(openMenu === 'work' ? null : 'work')}
           disabled={works.length === 0}
-          className="flex items-center gap-1.5 text-sm text-on-surface-secondary font-medium hover:text-on-surface transition-colors disabled:opacity-50 max-w-[180px]"
+          className="flex items-center gap-1.5 text-sm text-on-surface-secondary font-medium hover:text-on-surface transition-colors disabled:opacity-50 max-w-[110px] min-[1150px]:max-w-[180px]"
           title="切换作品"
         >
           <span className="truncate">{currentWork?.title || '未选择作品'}</span>
@@ -175,7 +175,7 @@ export default function WriterTopBar({
             {/* 章节下拉触发 */}
             <button
               onClick={() => setOpenMenu(openMenu === 'chapter' ? null : 'chapter')}
-              className="flex items-center gap-1 text-on-surface font-semibold hover:text-primary-600 transition-colors max-w-[200px]"
+              className="flex items-center gap-1 text-on-surface font-semibold hover:text-primary-600 transition-colors max-w-[120px] min-[1150px]:max-w-[200px]"
               title="切换章节"
             >
               <span className="truncate">{currentChapter?.title || ''}</span>
@@ -185,7 +185,7 @@ export default function WriterTopBar({
         )}
 
         {totalWords !== null && (
-          <span className="text-xs text-on-surface-secondary whitespace-nowrap">
+          <span className="hidden min-[1000px]:inline text-xs text-on-surface-secondary whitespace-nowrap">
             本章 {wordCount} 字 · 全书 {totalWords} 字
             {dailyGoal > 0 && (
               <span className={todayWords >= dailyGoal ? 'text-green-600 dark:text-green-400 font-medium' : ''}>
@@ -233,7 +233,7 @@ export default function WriterTopBar({
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span>版本</span>
+            <span className="hidden min-[1150px]:inline">版本</span>
           </button>
           {/* AI 助手 */}
           <button
@@ -245,7 +245,7 @@ export default function WriterTopBar({
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
             </svg>
-            <span>AI 助手</span>
+            <span className="hidden min-[1150px]:inline">AI 助手</span>
           </button>
           <button
             onClick={onToggleDrawer}
@@ -254,7 +254,7 @@ export default function WriterTopBar({
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            <span>分镜</span>
+            <span className="hidden min-[1150px]:inline">分镜</span>
           </button>
           <button
             onClick={onShowExportDialog}
@@ -264,7 +264,7 @@ export default function WriterTopBar({
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632 3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
             </svg>
-            <span>导出</span>
+            <span className="hidden min-[1150px]:inline">导出</span>
           </button>
         </div>
       </div>

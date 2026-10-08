@@ -302,7 +302,7 @@ export default function EditorToolbar({ workType, editorRef, wordCount }: Editor
   }, []);
 
   return (
-    <div className="h-12 border-b border-[#e5ddd2] flex items-center px-4 bg-[#faf8f5] gap-2 overflow-x-auto relative" ref={dropdownRef}>
+    <div className="min-h-12 border-b border-[#e5ddd2] flex flex-wrap items-center px-4 py-1 bg-[#faf8f5] gap-x-2 gap-y-1 relative" ref={dropdownRef}>
       {/* 基础格式化工具 */}
       <div className="flex items-center gap-1 pr-2 border-r border-[#e5ddd2]">
         <button

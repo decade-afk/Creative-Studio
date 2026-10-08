@@ -537,7 +537,7 @@ export default function DirectorView() {
 
       {/* 顶部导航 */}
       <div
-        className="flex items-center justify-between px-6 py-4"
+        className="flex flex-wrap items-center justify-between gap-y-2 px-6 py-4"
         style={{
           borderBottom: '1px solid var(--outline-variant)',
           backgroundColor: 'var(--surface-secondary)',
@@ -558,7 +558,7 @@ export default function DirectorView() {
           <div className="flex gap-2">
             <button
               onClick={() => setCurrentTab('clues')}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
                 currentTab === 'clues'
                   ? 'bg-primary-500 text-white'
                   : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
@@ -568,7 +568,7 @@ export default function DirectorView() {
             </button>
           <button
             onClick={() => setCurrentTab('conflicts')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
               currentTab === 'conflicts'
                 ? 'bg-primary-500 text-white'
                 : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
@@ -578,7 +578,7 @@ export default function DirectorView() {
           </button>
           <button
             onClick={() => setCurrentTab('storyboards')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
               currentTab === 'storyboards'
                 ? 'bg-primary-500 text-white'
                 : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
@@ -588,7 +588,7 @@ export default function DirectorView() {
           </button>
           <button
             onClick={() => setCurrentTab('assets')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
               currentTab === 'assets'
                 ? 'bg-primary-500 text-white'
                 : 'text-on-surface-variant hover:bg-on-surface-secondary/10'
@@ -604,7 +604,7 @@ export default function DirectorView() {
             <button
               onClick={() => setAiClueOpen(true)}
               disabled={loading || !currentWorkId}
-              className="px-4 py-2 border border-primary-400 text-primary-600 rounded-lg text-sm font-medium hover:bg-primary-50 transition-colors disabled:opacity-50"
+              className="px-4 py-2 border border-primary-400 text-primary-600 rounded-lg text-sm font-medium whitespace-nowrap hover:bg-primary-50 transition-colors disabled:opacity-50"
               title="AI 读取全部章节，自动发现伏笔与未回收悬念"
             >
               🤖 AI 检测伏笔
@@ -623,7 +623,7 @@ export default function DirectorView() {
           <button
             onClick={handleQuickCreate}
             disabled={loading || !currentWorkId}
-            className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-4 py-2 bg-primary-500 text-white rounded-lg text-sm font-medium whitespace-nowrap hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? '处理中...' : currentTab === 'assets' ? '+ 导入素材' : '+ 新建'}
           </button>

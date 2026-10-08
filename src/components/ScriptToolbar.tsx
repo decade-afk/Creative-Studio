@@ -331,7 +331,7 @@ export default function ScriptToolbar({ editorRef, wordCount }: ScriptToolbarPro
 
   return (
     <>
-      <div className="h-14 border-b border-[#e5ddd2] flex items-center px-4 bg-gradient-to-r from-[#faf8f5] to-[#f5f0e8] gap-2 overflow-x-auto relative shadow-sm" ref={dropdownRef}>
+      <div className="min-h-14 border-b border-[#e5ddd2] flex flex-wrap items-center px-4 py-1 bg-gradient-to-r from-[#faf8f5] to-[#f5f0e8] gap-x-2 gap-y-1 relative shadow-sm" ref={dropdownRef}>
         {/* 场景工具组 */}
         <div className="flex items-center gap-1 pr-3 border-r border-[#d1c3b4]">
           <button
