@@ -100,7 +100,7 @@ export default function WriterSidebar({
       {/* Works Section */}
       <div className="p-4 border-b border-outline">
         <div className="flex items-center justify-between mb-3">
-          <div className="text-sm font-semibold text-on-surface">Works</div>
+          <div className="text-sm font-semibold text-on-surface">作品</div>
           <button
             onClick={onCreateWork}
             className="w-7 h-7 rounded-lg bg-primary-500 text-white flex items-center justify-center hover:bg-primary-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
@@ -139,7 +139,7 @@ export default function WriterSidebar({
       <div className="flex-1 overflow-hidden flex flex-col">
         <div className="p-4 border-b border-outline">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-semibold text-on-surface">Chapters</div>
+            <div className="text-sm font-semibold text-on-surface">章节</div>
             <button
               onClick={onCreateChapter}
               className="w-7 h-7 rounded-lg bg-primary-500 text-white flex items-center justify-center hover:bg-primary-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
