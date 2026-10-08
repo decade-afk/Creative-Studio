@@ -34,3 +34,4 @@ src-tauri/Cargo.lock
 
 # 参考项目（仅本地查阅，不入库）
 reference/
+.rel/
