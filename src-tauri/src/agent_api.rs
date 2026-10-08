@@ -540,6 +540,7 @@ pub fn start(app: &tauri::AppHandle) {
             .route("/api/chapters/{id}", get(get_chapter).delete(delete_chapter))
             .route("/api/chapters", axum::routing::post(create_chapter))
             .route("/api/chapters/{id}/content", axum::routing::put(update_chapter_content))
+            .route("/api/chapters/{id}/title", axum::routing::put(update_chapter_title))
             .route("/api/ai/continue/{chapterId}", axum::routing::post(ai_continue))
             .route("/api/ai/review/{chapterId}", axum::routing::post(ai_review))
             .route("/api/ai/outline", axum::routing::post(ai_outline))
@@ -1447,4 +1448,19 @@ async fn save_chapter_version_api(
         rusqlite::params![id, chapter_id, work_id, title, content, word_count(&content), label, now()],
     ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
     Ok(Json(json!({ "versionId": id })))
+}
+
+/** 更新章节标题（修复重复前缀等场景） */
+async fn update_chapter_title(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let title = body["title"].as_str().ok_or((StatusCode::BAD_REQUEST, "title 必填".into()))?;
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let n = db
+        .execute("UPDATE chapters SET title = ?1, updated_at = ?2 WHERE id = ?3 AND deleted = 0", rusqlite::params![title, now(), id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    if n == 0 { return Err((StatusCode::NOT_FOUND, "章节不存在".into())); }
+    Ok(Json(json!({ "ok": true })))
 }

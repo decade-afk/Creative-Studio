@@ -184,14 +184,16 @@ export default function PlannerView() {
       setMilestones(mls);
       setWorldSettings(ws);
 
-      // 概览统计：章节数与总字数
+      // 概览统计：章节数与总字数（口径与写作页一致：中文字 + 英文单词）
       getChaptersByWorkId(currentWorkId)
         .then((chs) => {
           setChapterCount(chs.length);
-          const words = chs.reduce(
-            (sum, c) => sum + (c.content.replace(/<[^>]*>/g, '').replace(/\s/g, '').length),
-            0
-          );
+          let words = 0;
+          for (const c of chs) {
+            const text = c.content.replace(/<[^>]*>/g, '');
+            words += (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+            words += (text.match(/[a-zA-Z]+/g) || []).length;
+          }
           setTotalWords(words);
         })
         .catch(() => undefined);
@@ -1514,7 +1516,9 @@ function OutlineTreeView({
                 <h3 className="font-medium text-on-surface">{node.title}</h3>
               </div>
               {node.description && (
-                <p className="text-sm text-on-surface-secondary mt-1">{node.description}</p>
+                <p className={`text-sm text-on-surface-secondary mt-1 ${collapsed ? '' : 'line-clamp-4'}`}>
+                  {node.description}
+                </p>
               )}
             </div>
 

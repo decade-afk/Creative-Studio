@@ -5,8 +5,9 @@
  * 支持可调整宽度、拖拽调整大小
  */
 
-import { useRef } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { useWriterStore } from '../stores/writerStore';
+import { getCharactersByWorkId } from '../services/characterService';
 
 interface WriterSidebarProps {
   showSidebar: boolean;
@@ -38,6 +39,24 @@ export default function WriterSidebar({
   } = useWriterStore();
 
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const [characters, setCharacters] = useState<Array<{ id: string; name: string; avatar?: string; description?: string }>>([]);
+
+  // 当前作品的角色列表（跟随作品切换）
+  useEffect(() => {
+    if (!currentWorkId) {
+      setCharacters([]);
+      return;
+    }
+    let cancelled = false;
+    getCharactersByWorkId(currentWorkId)
+      .then((list) => {
+        if (!cancelled) setCharacters(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWorkId]);
 
   // 处理拖拽调整侧边栏宽度
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -166,15 +185,24 @@ export default function WriterSidebar({
         </div>
       </div>
 
-      {/* Characters Section */}
+      {/* Characters Section（真实数据：当前作品的角色） */}
       <div className="p-4 border-t border-outline">
-        <div className="text-sm font-semibold text-on-surface mb-3">Characters</div>
-        <div className="tree-item">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-          </svg>
-          <span>顾川 (男主)</span>
-        </div>
+        <div className="text-sm font-semibold text-on-surface mb-3">角色</div>
+        {characters.length === 0 && (
+          <div className="text-xs text-on-surface-secondary">
+            暂无角色，可在「规划 → 角色」中创建
+          </div>
+        )}
+        {characters.map((c) => (
+          <div key={c.id} className="tree-item" title={c.description || c.name}>
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+            </svg>
+            <span className="flex-1 truncate">
+              {c.avatar && !c.avatar.startsWith('http') ? c.avatar + ' ' : ''}{c.name}
+            </span>
+          </div>
+        ))}
       </div>
     </aside>
   );

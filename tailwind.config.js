@@ -15,12 +15,33 @@ export default {
           tertiary: 'var(--surface-tertiary)',
           container: 'var(--surface-container)',
         },
-        // 品牌色彩系统
+        // 品牌色彩系统（全色阶：40/60/80 为 CSS 变量，其余为派生色调）
         primary: {
           40: 'var(--primary-40)',
+          50: '#f7f2ec',
+          100: '#ece1d5',
+          200: '#d9c3ac',
+          300: '#c2a183',
+          400: '#a9805f',
           500: 'var(--primary-40)',
           60: 'var(--primary-60)',
+          600: 'var(--primary-60)',
+          700: 'var(--primary-80)',
           80: 'var(--primary-80)',
+          900: '#46301f',
+        },
+        // 强调色系统（暖金，与品牌棕互补）
+        accent: {
+          50: '#faf6ec',
+          100: '#f0e6d0',
+          200: '#e0cda5',
+          300: '#c9ab77',
+          400: '#b08d57',
+          500: '#b08d57',
+          600: '#96733f',
+          700: '#7a5d33',
+          800: '#5d4727',
+          900: '#46361d',
         },
         // 文本色彩系统
         text: {

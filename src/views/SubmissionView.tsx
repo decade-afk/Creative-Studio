@@ -201,15 +201,15 @@ export default function SubmissionView() {
                   const count = submissions.filter((s) => s.platform === pid).length;
                   return (
                     <div key={pid} className="p-5 bg-surface-secondary rounded-xl border border-outline">
-                      <div className="flex items-center justify-between mb-1">
-                        <div className="flex items-center gap-3">
-                          <span className="text-3xl">{platform.icon}</span>
-                          <div>
+                      <div className="flex items-start justify-between gap-3 mb-1">
+                        <div className="flex items-start gap-3 min-w-0">
+                          <span className="text-3xl shrink-0">{platform.icon}</span>
+                          <div className="min-w-0">
                             <h3 className="font-semibold text-on-surface">{platform.name}</h3>
-                            <p className="text-xs text-on-surface-secondary">{platform.hint}</p>
+                            <p className="text-xs text-on-surface-secondary break-words">{platform.hint}</p>
                           </div>
                         </div>
-                        <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap">
+                        <span className="text-xs px-2 py-1 rounded bg-surface-primary text-on-surface-secondary whitespace-nowrap shrink-0">
                           已投 {count} 章
                         </span>
                       </div>
