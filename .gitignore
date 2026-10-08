@@ -35,3 +35,11 @@ src-tauri/Cargo.lock
 # 参考项目（仅本地查阅，不入库）
 reference/
 .rel/
+
+# 临时产物
+.cover-url.txt
+.cover-raw.json
+.cover-b64.txt
+.test-cover.png
+别人修仙我过日子-封面.png
+scripts/fix-titles.cjs
