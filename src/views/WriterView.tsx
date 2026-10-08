@@ -40,6 +40,7 @@ import { getChaptersByWorkId, updateChapter, createChapter, deleteChapter } from
 import { exportWork, getWorkExportFormats } from '../services/exportService';
 import { getDatabase } from '../services/database';
 import { loadConfig, updateConfig } from '../services/configService';
+import { copyText, htmlToPlainText } from '../services/copyService';
 
 import { useWriterStore } from '../stores/writerStore';
 import WriterSidebar from '../components/WriterSidebar';
@@ -132,6 +133,24 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
   // 导出范围：整本作品 / 当前章节
   const [exportScope, setExportScope] = useState<'work' | 'chapter'>('work');
   const currentChapterData = getCurrentChapter();
+
+  /** 复制章节标题 */
+  const handleCopyTitle = useCallback(async () => {
+    if (!currentChapterData) return;
+    const ok = await copyText(currentChapterData.title);
+    showToast(ok ? '标题已复制' : '复制失败', ok ? 'success' : 'error');
+  }, [currentChapterData, showToast]);
+
+  /** 复制本章内容（纯文本） */
+  const handleCopyContent = useCallback(async () => {
+    const ed = editorRef.current;
+    if (!ed || !currentChapterId) return;
+    const ok = await copyText(htmlToPlainText(ed.innerHTML));
+    showToast(ok ? '本章内容已复制' : '复制失败', ok ? 'success' : 'error');
+  }, [currentChapterId, showToast]);
+
+  
+
 
   // 每次打开导出对话框时重置为整本导出
   useEffect(() => {
@@ -622,6 +641,8 @@ export default function WriterView({ showSidebar: externalShowSidebar, onToggleS
           onShowExportDialog={() => setShowExportDialog(true)}
           onToggleAiPanel={toggleAiPanel}
           onShowVersions={() => setShowVersionsDialog(true)}
+          onCopyTitle={handleCopyTitle}
+          onCopyContent={handleCopyContent}
           aiPanelOpen={showAiPanel}
         />
 

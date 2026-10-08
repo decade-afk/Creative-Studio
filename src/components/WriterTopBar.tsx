@@ -19,6 +19,10 @@ interface WriterTopBarProps {
   onShowVersions: () => void;
   /** AI 面板是否展开 */
   aiPanelOpen: boolean;
+  /** 复制章节标题 */
+  onCopyTitle: () => void;
+  /** 复制本章内容 */
+  onCopyContent: () => void;
 }
 
 export default function WriterTopBar({
@@ -27,6 +31,8 @@ export default function WriterTopBar({
   onToggleAiPanel,
   onShowVersions,
   aiPanelOpen,
+  onCopyTitle,
+  onCopyContent,
 }: WriterTopBarProps) {
   const { currentWorkId, currentChapterId, getCurrentWork, getCurrentChapter } = useWriterStore();
   const wordCount = useWriterStore((state) => state.wordCount);
@@ -112,6 +118,29 @@ export default function WriterTopBar({
             )}
           </span>
         )}
+        {/* 标题 / 内容 复制 */}
+        <span className="flex items-center gap-1 whitespace-nowrap">
+          <button
+            onClick={onCopyTitle}
+            disabled={!currentChapter}
+            className="p-1.5 text-on-surface-secondary hover:text-on-surface hover:bg-surface-tertiary rounded transition-colors disabled:opacity-40"
+            title="复制章节标题"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h10v10H7z M7 7V3h10v4 M5 21h14a2 2 0 002-2V9a2 2 0 00-2-2" />
+            </svg>
+          </button>
+          <button
+            onClick={onCopyContent}
+            disabled={!currentChapter}
+            className="p-1.5 text-on-surface-secondary hover:text-on-surface hover:bg-surface-tertiary rounded transition-colors disabled:opacity-40"
+            title="复制本章内容"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
+            </svg>
+          </button>
+        </span>
       </div>
 
       {/* 右侧：操作按钮 */}

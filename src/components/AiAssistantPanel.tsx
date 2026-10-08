@@ -29,6 +29,7 @@ import {
   type AiConfig,
 } from '../services/aiService';
 import { saveChapterVersion } from '../services/chapterService';
+import { copyText } from '../services/copyService';
 
 /** 动作类型 */
 export type AiAction = 'continue' | 'polish' | 'summary' | 'review';
@@ -202,7 +203,7 @@ export default function AiAssistantPanel({ editorRef, onClose }: AiAssistantPane
 
     if (action === 'review' || action === 'summary') {
       // 审稿/摘要结果不直接进正文，复制即可
-      navigator.clipboard.writeText(output).then(
+      copyText(output).then(
         () => showToast('已复制到剪贴板', 'success'),
         () => showToast('复制失败，请手动选择文本', 'error')
       );
@@ -366,7 +367,7 @@ export default function AiAssistantPanel({ editorRef, onClose }: AiAssistantPane
                   </button>
                 )}
                 <button
-                  onClick={() => navigator.clipboard.writeText(output).then(() => showToast('已复制', 'success'))}
+                  onClick={() => copyText(output).then(() => showToast('已复制', 'success'))}
                   className="flex-1 px-3 py-1.5 text-xs rounded-lg border border-surface-border text-on-surface hover:bg-surface-tertiary"
                 >
                   复制
