@@ -1,6 +1,6 @@
 ---
 name: creative-studio
-description: Use when the user asks to write/edit novels or scripts stored in the Creative Studio desktop app, continue or review chapters with the app's built-in AI, generate outlines from a premise, or search their writing library. Requires the Creative Studio app to be running (its Agent API listens on 127.0.0.1:8765). Tools: list_works, create_work, list_chapters, read_chapter, create_chapter, write_chapter, delete_chapter, ai_continue, ai_review, ai_outline, search, work_stats.
+description: Use when the user asks to write/edit novels or scripts stored in the Creative Studio desktop app, continue or review chapters with the app's built-in AI, generate outlines from a premise, or search their writing library. Requires the Creative Studio app to be running (its Agent API listens on 127.0.0.1:8765). Tools: list_works, create_work, update_work, delete_work, list_chapters, read_chapter, create_chapter, write_chapter, delete_chapter, get_outline, delete_outline_node, list_characters, create_character, list_scenes, create_scene, list_world_settings, create_world_setting, list_clues, create_clue, resolve_clue, list_conflicts, create_conflict, list_storyboards, list_submissions, ai_continue, ai_review, ai_summary, ai_outline, ai_gen_characters, ai_gen_scenes, ai_detect_clues, ai_gen_storyboards, export_work, import_text, list_chapter_versions, save_chapter_version, search, work_stats.
 ---
 
 # Creative Studio 创作库操作

@@ -1,15 +1,19 @@
 {
   "name": "creative-studio",
-  "version": "0.1.0",
-  "description": "把 Creative Studio 桌面创作软件接入 ZCode：读写作品与章节、调用内置 AI 续写/审稿/大纲、全局搜索。前置条件：Creative Studio 应用正在运行（Agent API 监听 127.0.0.1:8765）。",
-  "author": { "name": "ADream-ki" },
+  "version": "0.2.0",
+  "description": "把 Creative Studio 桌面创作软件完整接入 ZCode：38 个工具覆盖作品/章节/大纲/角色/场景/世界观/伏笔/冲突/分镜读写、8 个 AI 工作流（续写/审稿/摘要/大纲/角色/场景/伏笔检测/分镜）、六格式导出、TXT 导入、版本快照、投递台账、全局搜索。前置条件：Creative Studio 应用正在运行。",
+  "author": {
+    "name": "ADream-ki"
+  },
   "license": "MIT",
   "skills": "skills",
   "mcpServers": {
     "creative-studio": {
       "type": "stdio",
       "command": "node",
-      "args": ["mcp-server.mjs"],
+      "args": [
+        "mcp-server.mjs"
+      ],
       "env": {}
     }
   }

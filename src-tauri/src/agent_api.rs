@@ -532,6 +532,29 @@ pub fn start(app: &tauri::AppHandle) {
             .route("/api/ai/outline", axum::routing::post(ai_outline))
             .route("/api/search", get(search))
             .route("/api/stats/{workId}", get(stats))
+            // 扩展：作品管理
+            .route("/api/works/{id}", axum::routing::put(update_work).delete(delete_work))
+            // 扩展：规划数据
+            .route("/api/works/{id}/outline", get(get_outline))
+            .route("/api/outline/{id}", axum::routing::delete(delete_outline_node))
+            .route("/api/works/{id}/characters", get(get_characters).post(create_character))
+            .route("/api/works/{id}/scenes", get(get_scenes).post(create_scene))
+            .route("/api/works/{id}/world-settings", get(get_world_settings).post(create_world_setting))
+            .route("/api/works/{id}/clues", get(get_clues).post(create_clue))
+            .route("/api/clues/{id}/status", axum::routing::put(update_clue_status))
+            .route("/api/works/{id}/conflicts", get(get_conflicts).post(create_conflict))
+            .route("/api/works/{id}/storyboards", get(get_storyboards))
+            .route("/api/works/{id}/submissions", get(get_submissions))
+            // 扩展：AI 全家桶
+            .route("/api/ai/summary/{chapterId}", axum::routing::post(ai_summary))
+            .route("/api/ai/characters", axum::routing::post(ai_gen_characters))
+            .route("/api/ai/scenes", axum::routing::post(ai_gen_scenes))
+            .route("/api/ai/detect-clues/{workId}", axum::routing::post(ai_detect_clues))
+            .route("/api/ai/storyboards/{chapterId}", axum::routing::post(ai_gen_storyboards))
+            // 扩展：导出/导入/版本
+            .route("/api/export", axum::routing::post(export_work_file))
+            .route("/api/import", axum::routing::post(import_text))
+            .route("/api/chapters/{id}/versions", get(list_chapter_versions).post(save_chapter_version_api))
             .with_state(app);
 
         let listener = match tokio::net::TcpListener::bind("127.0.0.1:8765").await {
@@ -546,4 +569,617 @@ pub fn start(app: &tauri::AppHandle) {
             tracing::warn!("Agent API 退出: {}", e);
         }
     });
+}
+
+// ============================================================================
+// 扩展端点：作品管理 / 规划数据 CRUD（大纲/角色/场景/世界观/伏笔/冲突/分镜）
+// ============================================================================
+
+async fn update_work(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut sets = vec!["updated_at = ?1".to_string()];
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now())];
+    let mut idx = 2;
+    if let Some(t) = body["title"].as_str() {
+        sets.push(format!("title = ?{}", idx));
+        params.push(Box::new(t.to_string()));
+        idx += 1;
+    }
+    if let Some(d) = body["description"].as_str() {
+        sets.push(format!("description = ?{}", idx));
+        params.push(Box::new(d.to_string()));
+        idx += 1;
+    }
+    let sql = format!("UPDATE works SET {} WHERE id = ?{} AND deleted = 0", sets.join(", "), idx);
+    params.push(Box::new(id));
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let n = db.execute(&sql, refs.as_slice()).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    if n == 0 { return Err((StatusCode::NOT_FOUND, "作品不存在".into())); }
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn delete_work(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    db.execute("UPDATE works SET deleted = 1, updated_at = ?1 WHERE id = ?2", rusqlite::params![now(), id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+/** 通用列表查询助手（单表 where work_id） */
+fn list_by_work(db: &Connection, table: &str, work_id: &str, order: &str) -> Result<Vec<Value>, String> {
+    // 表名来自代码常量，不做用户输入拼接
+    let sql = format!("SELECT * FROM {} WHERE work_id = ?1 AND deleted = 0 ORDER BY {}", table, order);
+    let mut stmt = db.prepare(&sql).map_err(|e| format!("{}", e))?;
+    let cols: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
+    let rows = stmt
+        .query_map([work_id], |r| {
+            let mut obj = serde_json::Map::new();
+            for (i, c) in cols.iter().enumerate() {
+                let v: Value = match r.get_ref(i) {
+                    Ok(rusqlite::types::ValueRef::Null) => Value::Null,
+                    Ok(rusqlite::types::ValueRef::Integer(n)) => json!(n),
+                    Ok(rusqlite::types::ValueRef::Real(f)) => json!(f),
+                    Ok(rusqlite::types::ValueRef::Text(t)) => json!(String::from_utf8_lossy(t)),
+                    Ok(rusqlite::types::ValueRef::Blob(b)) => json!(String::from_utf8_lossy(b)),
+                    Err(_) => Value::Null,
+                };
+                obj.insert(c.clone(), v);
+            }
+            Ok(Value::Object(obj))
+        })
+        .map_err(|e| format!("{}", e))?;
+    Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+async fn get_outline(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let list = list_by_work(&db, "outline_nodes", &work_id, "\"order\" ASC").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!(list)))
+}
+
+async fn delete_outline_node(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    db.execute("UPDATE outline_nodes SET deleted = 1, updated_at = ?1 WHERE id = ?2", rusqlite::params![now(), id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn get_characters(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!(list_by_work(&db, "characters", &work_id, "created_at ASC").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?)))
+}
+
+async fn create_character(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let id = uuid();
+    db.execute(
+        "INSERT INTO characters (id, work_id, name, description, avatar, personality, relationships, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 0)",
+        rusqlite::params![id, work_id, body["name"].as_str().unwrap_or("新角色"), body["description"].as_str().unwrap_or(""), body["avatar"].as_str().unwrap_or("👤"), body["personality"].as_str().unwrap_or(""), body["relationships"].as_str().unwrap_or(""), now()],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "id": id })))
+}
+
+async fn get_scenes(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!(list_by_work(&db, "scenes", &work_id, "created_at ASC").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?)))
+}
+
+async fn create_scene(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let tod = body["timeOfDay"].as_str().or(body["time_of_day"].as_str()).unwrap_or("other");
+    let tod = if ["morning","noon","evening","night","other"].contains(&tod) { tod } else { "other" };
+    let id = uuid();
+    db.execute(
+        "INSERT INTO scenes (id, work_id, name, description, location, time_of_day, mood, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 0)",
+        rusqlite::params![id, work_id, body["name"].as_str().unwrap_or("新场景"), body["description"].as_str().unwrap_or(""), body["location"].as_str().unwrap_or(""), tod, body["mood"].as_str().unwrap_or(""), now()],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "id": id })))
+}
+
+async fn get_world_settings(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS world_settings (id TEXT PRIMARY KEY NOT NULL, work_id TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'location', title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', icon_type TEXT, icon_color TEXT, tags TEXT NOT NULL DEFAULT '[]', related_characters TEXT NOT NULL DEFAULT '[]', related_settings TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)").ok();
+    Ok(Json(json!(list_by_work(&db, "world_settings", &work_id, "created_at ASC").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?)))
+}
+
+async fn create_world_setting(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    db.execute_batch("CREATE TABLE IF NOT EXISTS world_settings (id TEXT PRIMARY KEY NOT NULL, work_id TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'location', title TEXT NOT NULL, content TEXT NOT NULL DEFAULT '', icon_type TEXT, icon_color TEXT, tags TEXT NOT NULL DEFAULT '[]', related_characters TEXT NOT NULL DEFAULT '[]', related_settings TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0)").ok();
+    let cat = body["category"].as_str().unwrap_or("location");
+    let cat = if ["location","organization","event","culture","technology","magic"].contains(&cat) { cat } else { "location" };
+    let id = uuid();
+    db.execute(
+        "INSERT INTO world_settings (id, work_id, category, title, content, tags, related_characters, related_settings, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, '[]', '[]', '[]', ?6, ?6, 0)",
+        rusqlite::params![id, work_id, cat, body["title"].as_str().unwrap_or("新设定"), body["content"].as_str().unwrap_or(""), now()],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "id": id })))
+}
+
+async fn get_clues(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!(list_by_work(&db, "clues", &work_id, "created_at ASC").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?)))
+}
+
+async fn create_clue(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let id = uuid();
+    db.execute(
+        "INSERT INTO clues (id, work_id, name, source, status, setup_scene_id, payoff_scene_id, description, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, 'manual', ?4, NULL, NULL, ?5, ?6, ?6, 0)",
+        rusqlite::params![id, work_id, body["name"].as_str().unwrap_or("新伏笔"), body["status"].as_str().unwrap_or("open"), body["description"].as_str().unwrap_or(""), now()],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "id": id })))
+}
+
+async fn update_clue_status(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let status = body["status"].as_str().ok_or((StatusCode::BAD_REQUEST, "status 必填".into()))?;
+    if !["open", "resolved"].contains(&status) {
+        return Err((StatusCode::BAD_REQUEST, "status 只能是 open/resolved".into()));
+    }
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    db.execute("UPDATE clues SET status = ?1, updated_at = ?2 WHERE id = ?3", rusqlite::params![status, now(), id])
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn get_conflicts(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!(list_by_work(&db, "conflicts", &work_id, "created_at ASC").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?)))
+}
+
+async fn create_conflict(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let typ = body["type"].as_str().unwrap_or("character");
+    let typ = if ["character","environment","internal","social"].contains(&typ) { typ } else { "character" };
+    let intensity = body["intensity"].as_str().unwrap_or("medium");
+    let intensity = if ["low","medium","high","critical"].contains(&intensity) { intensity } else { "medium" };
+    let status = body["status"].as_str().unwrap_or("active");
+    let status = if ["active","escalating","resolving","resolved"].contains(&status) { status } else { "active" };
+    let id = uuid();
+    db.execute(
+        "INSERT INTO conflicts (id, work_id, name, type, intensity, characters, scene_id, description, resolution, status, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, ?7, ?8, ?9, ?10, ?10, 0)",
+        rusqlite::params![id, work_id, body["name"].as_str().unwrap_or("新冲突"), typ, intensity, body["characters"].as_str().unwrap_or(""), body["description"].as_str().unwrap_or(""), body["resolution"].as_str().unwrap_or(""), status, now()],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "id": id })))
+}
+
+async fn get_storyboards(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!(list_by_work(&db, "storyboards", &work_id, "\"order\" ASC").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?)))
+}
+
+async fn get_submissions(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    // submissions 表无软删除列，走专用查询
+    let mut stmt = db
+        .prepare("SELECT id, chapter_id, platform, chapter_title, status, note, created_at FROM submissions WHERE work_id = ?1 ORDER BY created_at DESC")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    let list = stmt
+        .query_map([&work_id], |r: &rusqlite::Row| {
+            Ok(json!({
+                "id": r.get::<_, String>(0)?,
+                "chapterId": r.get::<_, String>(1)?,
+                "platform": r.get::<_, String>(2)?,
+                "chapterTitle": r.get::<_, String>(3)?,
+                "status": r.get::<_, String>(4)?,
+                "note": r.get::<_, String>(5)?,
+                "createdAt": r.get::<_, String>(6)?,
+            }))
+        })
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+    Ok(Json(json!(list)))
+}
+
+// ============================================================================
+// AI 扩展端点：摘要 / 角色生成 / 场景生成 / 伏笔检测 / 分镜生成
+// ============================================================================
+
+/** AI 生成章节摘要（不落库，返回文本） */
+async fn ai_summary(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(chapter_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let (title, content): (String, String) = db
+        .query_row("SELECT title, content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".to_string()))?;
+    let body_text: String = html_to_text(&content).chars().take(8000).collect();
+    let messages = json!([
+        { "role": "system", "content": "你是专业编辑，直接输出摘要，不要前言。" },
+        { "role": "user", "content": format!("为章节「{}」生成 150 字以内的梗概（关键事件、人物动机、结尾悬念）：\n\n{}", title, body_text) }
+    ]);
+    let summary = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(json!({ "summary": summary })))
+}
+
+/** 从 AI 输出提取 JSON 数组（容忍代码块包裹） */
+fn extract_json_array(text: &str) -> Option<Vec<Value>> {
+    let start = text.find('[')?;
+    let end = text.rfind(']')?;
+    serde_json::from_str::<Value>(&text[start..=end]).ok()?.as_array().cloned()
+}
+
+/** AI 批量生成角色并入库 */
+async fn ai_gen_characters(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let work_id = body["workId"].as_str().ok_or((StatusCode::BAD_REQUEST, "workId 必填".into()))?.to_string();
+    let premise = body["premise"].as_str().unwrap_or("");
+    let count = body["count"].as_i64().unwrap_or(5);
+    let messages = json!([
+        { "role": "system", "content": format!("你是小说人物架构师。只输出 JSON 数组，每个元素 {{\"name\":\"\",\"avatar\":\"emoji\",\"description\":\"80字内\",\"personality\":\"\",\"relationships\":\"与其他角色的关系\"}}。生成 {} 个有戏剧张力的角色。", count) },
+        { "role": "user", "content": format!("作品创意：{}", premise) }
+    ]);
+    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let arr = extract_json_array(&text).unwrap_or_default();
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut created = Vec::new();
+    for item in arr.iter().take(20) {
+        let name = item["name"].as_str().unwrap_or("").to_string();
+        if name.is_empty() { continue; }
+        let id = uuid();
+        db.execute(
+            "INSERT INTO characters (id, work_id, name, description, avatar, personality, relationships, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 0)",
+            rusqlite::params![id, work_id, name, item["description"].as_str().unwrap_or(""), item["avatar"].as_str().unwrap_or("👤"), item["personality"].as_str().unwrap_or(""), item["relationships"].as_str().unwrap_or(""), now()],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+        created.push(json!({ "id": id, "name": name }));
+    }
+    Ok(Json(json!({ "created": created.len(), "characters": created })))
+}
+
+/** AI 批量生成场景并入库 */
+async fn ai_gen_scenes(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let work_id = body["workId"].as_str().ok_or((StatusCode::BAD_REQUEST, "workId 必填".into()))?.to_string();
+    let premise = body["premise"].as_str().unwrap_or("");
+    let count = body["count"].as_i64().unwrap_or(5);
+    let messages = json!([
+        { "role": "system", "content": format!("你是美术指导。只输出 JSON 数组，每个元素 {{\"name\":\"\",\"location\":\"\",\"timeOfDay\":\"morning|noon|evening|night|other\",\"mood\":\"\",\"description\":\"80字内\"}}。生成 {} 个有画面感的场景。", count) },
+        { "role": "user", "content": format!("作品创意：{}", premise) }
+    ]);
+    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let arr = extract_json_array(&text).unwrap_or_default();
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut created = Vec::new();
+    for item in arr.iter().take(20) {
+        let name = item["name"].as_str().unwrap_or("").to_string();
+        if name.is_empty() { continue; }
+        let tod = item["timeOfDay"].as_str().or(item["time_of_day"].as_str()).unwrap_or("other");
+        let tod = if ["morning","noon","evening","night","other"].contains(&tod) { tod } else { "other" };
+        let id = uuid();
+        db.execute(
+            "INSERT INTO scenes (id, work_id, name, description, location, time_of_day, mood, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 0)",
+            rusqlite::params![id, work_id, name, item["description"].as_str().unwrap_or(""), item["location"].as_str().unwrap_or(""), tod, item["mood"].as_str().unwrap_or(""), now()],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+        created.push(json!({ "id": id, "name": name }));
+    }
+    Ok(Json(json!({ "created": created.len(), "scenes": created })))
+}
+
+/** AI 检测全书伏笔并入库（来源标记 ai_detected） */
+async fn ai_detect_clues(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let chapters = {
+        let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let mut stmt = db
+            .prepare("SELECT title, content FROM chapters WHERE work_id = ?1 AND deleted = 0 ORDER BY chapter_order")
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+        let rows = stmt
+            .query_map([&work_id], |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?
+            .flatten()
+            .map(|(t, c)| (t, html_to_text(&c)))
+            .collect::<Vec<_>>();
+        rows
+    };
+    if chapters.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "作品没有章节内容".into()));
+    }
+    let body_all = chapters.iter().map(|(t, c)| format!("【{}】\n{}", t, c.chars().take(3000).collect::<String>())).collect::<Vec<_>>().join("\n\n");
+    let messages = json!([
+        { "role": "system", "content": "你是严谨的中文编辑。只输出 JSON 数组（可为空 []），每个元素 {\"name\":\"伏笔简称\",\"description\":\"埋设位置与暗示内容\"}。只列确实存在于正文的伏笔。" },
+        { "role": "user", "content": format!("检测以下章节中的伏笔：\n\n{}", body_all.chars().take(12000).collect::<String>()) }
+    ]);
+    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let arr = extract_json_array(&text).unwrap_or_default();
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut created = Vec::new();
+    for item in arr.iter().take(20) {
+        let name = item["name"].as_str().unwrap_or("").to_string();
+        if name.is_empty() { continue; }
+        let id = uuid();
+        db.execute(
+            "INSERT INTO clues (id, work_id, name, source, status, setup_scene_id, payoff_scene_id, description, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, 'ai_detected', 'open', NULL, NULL, ?4, ?5, ?5, 0)",
+            rusqlite::params![id, work_id, name, item["description"].as_str().unwrap_or(""), now()],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+        created.push(json!({ "id": id, "name": name }));
+    }
+    Ok(Json(json!({ "detected": created.len(), "clues": created })))
+}
+
+/** AI 生成分镜并入库（关联章节，order 续接） */
+async fn ai_gen_storyboards(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(chapter_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let (work_id, title, content): (String, String, String) = db
+        .query_row("SELECT work_id, title, content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r: &rusqlite::Row| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".to_string()))?;
+    let messages = json!([
+        { "role": "system", "content": "你是影视分镜师。只输出 JSON 数组，每个元素 {\"title\":\"\",\"description\":\"\",\"shotType\":\"wide|medium|close|extreme_close\",\"cameraMovement\":\"static|pan|tilt|zoom|dolly|crane\",\"duration\":秒}。8-12 个镜头。" },
+        { "role": "user", "content": format!("为章节「{}」设计分镜：\n\n{}", title, html_to_text(&content).chars().take(8000).collect::<String>()) }
+    ]);
+    let text = crate::ai::chat_once_from_config(&app, messages).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let arr = extract_json_array(&text).unwrap_or_default();
+    let base_order: i64 = db
+        .query_row("SELECT COUNT(*) FROM storyboards WHERE chapter_id = ?1 AND deleted = 0", [&chapter_id], |r| r.get(0))
+        .unwrap_or(0);
+    let mut created = Vec::new();
+    for (i, item) in arr.iter().take(20).enumerate() {
+        let st = item["shotType"].as_str().or(item["shot_type"].as_str()).unwrap_or("medium");
+        let st = if ["wide","medium","close","extreme_close"].contains(&st) { st } else { "medium" };
+        let cm = item["cameraMovement"].as_str().or(item["camera_movement"].as_str()).unwrap_or("static");
+        let cm = if ["static","pan","tilt","zoom","dolly","crane"].contains(&cm) { cm } else { "static" };
+        let dur = item["duration"].as_i64().unwrap_or(5).clamp(1, 60);
+        let id = uuid();
+        db.execute(
+            "INSERT INTO storyboards (id, work_id, chapter_id, scene_id, title, description, shot_type, camera_movement, duration, \"order\", thumbnail_url, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?10, 0)",
+            rusqlite::params![id, work_id, chapter_id, item["title"].as_str().unwrap_or("未命名镜头"), item["description"].as_str().unwrap_or(""), st, cm, dur, base_order + i as i64, now()],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+        created.push(json!({ "id": id, "title": item["title"].as_str().unwrap_or("") }));
+    }
+    Ok(Json(json!({ "created": created.len(), "storyboards": created })))
+}
+
+// ============================================================================
+// 导出 / 导入 / 版本
+// ============================================================================
+
+/** 导出作品（或单章）为文件 */
+async fn export_work_file(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let work_id = body["workId"].as_str().ok_or((StatusCode::BAD_REQUEST, "workId 必填".into()))?.to_string();
+    let format = body["format"].as_str().unwrap_or("txt");
+    let save_path = body["savePath"].as_str().ok_or((StatusCode::BAD_REQUEST, "savePath 必填（绝对路径）".into()))?.to_string();
+    let chapter_id = body["chapterId"].as_str();
+
+    let (title, wtype, desc, mut chapters): (String, String, Option<String>, Vec<(String, String, String, i64)>) = {
+        let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let meta = db
+            .query_row("SELECT title, type, description FROM works WHERE id = ?1 AND deleted = 0", [&work_id], |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)))
+            .map_err(|_| (StatusCode::NOT_FOUND, "作品不存在".to_string()))?;
+        let mut stmt = db
+            .prepare("SELECT id, title, content, chapter_order FROM chapters WHERE work_id = ?1 AND deleted = 0 ORDER BY chapter_order")
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+        let rows = stmt
+            .query_map([&work_id], |r: &rusqlite::Row| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?
+            .flatten()
+            .collect::<Vec<_>>();
+        (meta.0, meta.1, meta.2, rows)
+    };
+    if let Some(cid) = chapter_id {
+        chapters.retain(|c| c.0 == cid);
+    }
+    if chapters.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "没有可导出的章节".into()));
+    }
+
+    // 组装 ExportData（camelCase 与 Rust 端 serde 对齐）
+    let data = json!({
+        "work": { "id": work_id, "title": title, "type": wtype, "description": desc },
+        "chapters": chapters.iter().map(|c| json!({ "id": c.0, "title": c.1, "content": c.2, "order": c.3 })).collect::<Vec<_>>(),
+        "options": { "workId": work_id, "format": format, "savePath": save_path, "includeToc": chapter_id.is_none(), "author": body["author"].as_str() }
+    });
+    let export_data: crate::export::ExportData = serde_json::from_value(data)
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("参数无效: {}", e)))?;
+
+    let result = match format {
+        "txt" => crate::export::export_to_txt(export_data).await,
+        "markdown" | "md" => crate::export::export_to_markdown(export_data).await,
+        "html" => crate::export::export_to_html(export_data).await,
+        "word" | "docx" => crate::export::export_to_word(export_data).await,
+        "epub" => crate::export::export_to_epub(export_data).await,
+        "script" | "fountain" => crate::export::export_to_script(export_data).await,
+        _ => return Err((StatusCode::BAD_REQUEST, "不支持的格式（txt/markdown/html/word/epub/script）".into())),
+    };
+    match result {
+        Ok(r) => Ok(Json(json!({ "ok": true, "filePath": save_path, "fileSize": r.file_size }))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
+}
+
+/** 导入整本 TXT 文本（自动分章） */
+async fn import_text(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let title = body["title"].as_str().ok_or((StatusCode::BAD_REQUEST, "title 必填".into()))?.to_string();
+    let text = body["text"].as_str().ok_or((StatusCode::BAD_REQUEST, "text 必填".into()))?.to_string();
+    let wtype = body["type"].as_str().unwrap_or("novel");
+
+    // 分章：按"第X章/节/回/卷/幕"行切分；无结构则按 6000 字切
+    let mut chapters: Vec<(String, String)> = Vec::new();
+    let cn = "一二三四五六七八九十百千万零两";
+    let re_title = |line: &str| -> Option<String> {
+        let t = line.trim().trim_start_matches('#').trim();
+        if !t.starts_with("第") { return None; }
+        let after = &t[3..];
+        let mut end = None;
+        for (i, ch) in after.char_indices() {
+            if "章节回卷部集幕".contains(ch) {
+                end = Some(i + ch.len_utf8());
+                break;
+            }
+            if !(ch.is_ascii_digit() || cn.contains(ch)) {
+                return None;
+            }
+        }
+        end.map(|e| t[..3 + e].trim().to_string())
+    };
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut current: Option<(String, String)> = None;
+    for line in lines {
+        if let Some(t) = re_title(line) {
+            if let Some((title, body)) = current.take() {
+                chapters.push((title, body.trim().to_string()));
+            }
+            current = Some((t, String::new()));
+        } else if let Some((_, body)) = current.as_mut() {
+            body.push_str(line);
+            body.push('\n');
+        } else if line.trim().len() > 50 {
+            current = Some(("开头".to_string(), format!("{}\n", line)));
+        }
+    }
+    if let Some((title, body)) = current.take() {
+        chapters.push((title, body.trim().to_string()));
+    }
+    if chapters.is_empty() {
+        // 兜底：按段落累积 6000 字切分
+        let mut buf: Vec<&str> = Vec::new();
+        let mut size = 0usize;
+        for para in text.split("\n\n") {
+            buf.push(para);
+            size += para.len();
+            if size >= 6000 {
+                chapters.push((format!("第{}章", chapters.len() + 1), buf.join("\n\n")));
+                buf.clear();
+                size = 0;
+            }
+        }
+        if !buf.is_empty() {
+            chapters.push((format!("第{}章", chapters.len() + 1), buf.join("\n\n")));
+        }
+    }
+    if chapters.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "文本为空".into()));
+    }
+
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let work_id = uuid();
+    db.execute(
+        "INSERT INTO works (id, title, type, icon, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?5, 0)",
+        rusqlite::params![work_id, title, wtype, if wtype == "script" { "🎬" } else { "📖" }, now()],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    for (i, (ct, cb)) in chapters.iter().enumerate() {
+        let cid = uuid();
+        db.execute(
+            "INSERT INTO chapters (id, work_id, title, content, chapter_order, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, 0)",
+            rusqlite::params![cid, work_id, ct, text_to_html(cb), (i + 1) as i64, now()],
+        ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    }
+    Ok(Json(json!({ "workId": work_id, "chapters": chapters.len(), "totalChars": text.len() })))
+}
+
+/** 章节版本列表 */
+async fn list_chapter_versions(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(chapter_id): Path<String>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let mut stmt = db
+        .prepare("SELECT id, title, word_count, label, created_at FROM chapter_versions WHERE chapter_id = ?1 ORDER BY created_at DESC LIMIT 50")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    let list = stmt
+        .query_map([&chapter_id], |r: &rusqlite::Row| {
+            Ok(json!({
+                "id": r.get::<_, String>(0)?,
+                "title": r.get::<_, String>(1)?,
+                "wordCount": r.get::<_, i64>(2)?,
+                "label": r.get::<_, String>(3)?,
+                "createdAt": r.get::<_, String>(4)?,
+            }))
+        })
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?
+        .filter_map(|r| r.ok())
+        .collect::<Vec<_>>();
+    Ok(Json(json!(list)))
+}
+
+/** 保存章节版本快照（agent 大改前的保命索） */
+async fn save_chapter_version_api(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(chapter_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let label = body["label"].as_str().unwrap_or("agent 快照");
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let (work_id, title, content): (String, String, String) = db
+        .query_row("SELECT work_id, title, content FROM chapters WHERE id = ?1 AND deleted = 0", [&chapter_id], |r: &rusqlite::Row| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map_err(|_| (StatusCode::NOT_FOUND, "章节不存在".to_string()))?;
+    let id = uuid();
+    db.execute(
+        "INSERT INTO chapter_versions (id, chapter_id, work_id, title, content, word_count, label, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        rusqlite::params![id, chapter_id, work_id, title, content, word_count(&content), label, now()],
+    ).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "versionId": id })))
 }

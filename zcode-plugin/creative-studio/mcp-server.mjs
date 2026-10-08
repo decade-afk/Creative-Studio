@@ -2,148 +2,126 @@
 /**
  * Creative Studio MCP Server（stdio → 本地 REST 桥）
  *
- * 让 Claude Code / Cursor 等任意 MCP 客户端直接使用 Creative Studio：
- * 读写作品与章节、调用软件内置的 AI 工作流（续写/审稿/大纲）、全局搜索。
+ * 让 Claude Code / Cursor / ZCode（经本地插件）等 MCP 客户端直接使用
+ * Creative Studio：读写作品/章节/大纲/角色/场景/世界观/伏笔/冲突/分镜，
+ * 调用软件内置 AI 工作流（续写/审稿/摘要/大纲/角色/场景/伏笔检测/分镜），
+ * 导出六格式、导入 TXT、版本快照、投递台账、全局搜索。
  *
  * 【前提】Creative Studio 桌面应用正在运行（Agent API 监听 127.0.0.1:8765）
- *
- * 【接入 Claude Code】
- *   claude mcp add creative-studio -- node <本项目路径>/scripts/mcp-server.mjs
- * 或写入 .mcp.json：
- *   { "mcpServers": { "creative-studio": {
- *       "command": "node", "args": ["<绝对路径>/scripts/mcp-server.mjs"] } } }
+ * 【环境变量】CS_API_BASE 可覆盖 API 地址
  */
-
-import { readFileSync } from 'node:fs';
 
 const API_BASE = process.env.CS_API_BASE || 'http://127.0.0.1:8765';
 
-/** 工具定义（MCP tools） */
+const T = (name, description, properties, required) => ({
+  name,
+  description,
+  inputSchema: { type: 'object', properties, required },
+});
+
 const TOOLS = [
-  {
-    name: 'list_works',
-    description: '列出 Creative Studio 中的全部作品（含章节数与总字数）',
-    inputSchema: { type: 'object', properties: {} },
-  },
-  {
-    name: 'create_work',
-    description: '创建新作品',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        title: { type: 'string', description: '作品标题' },
-        type: { type: 'string', enum: ['novel', 'script'], description: '类型：小说/短剧' },
-      },
-      required: ['title'],
-    },
-  },
-  {
-    name: 'list_chapters',
-    description: '列出作品的章节（含字数）',
-    inputSchema: {
-      type: 'object',
-      properties: { workId: { type: 'string' } },
-      required: ['workId'],
-    },
-  },
-  {
-    name: 'read_chapter',
-    description: '读取章节全文（HTML 与纯文本）',
-    inputSchema: {
-      type: 'object',
-      properties: { chapterId: { type: 'string' } },
-      required: ['chapterId'],
-    },
-  },
-  {
-    name: 'create_chapter',
-    description: '在作品下创建新章节（content 接受纯文本或 HTML，纯文本自动分段）',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        workId: { type: 'string' },
-        title: { type: 'string' },
-        content: { type: 'string', description: '章节正文（纯文本即可）' },
-      },
-      required: ['workId', 'title'],
-    },
-  },
-  {
-    name: 'write_chapter',
-    description: '整体替换章节正文（content 接受纯文本或 HTML）',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        chapterId: { type: 'string' },
-        content: { type: 'string' },
-      },
-      required: ['chapterId', 'content'],
-    },
-  },
-  {
-    name: 'delete_chapter',
-    description: '删除章节（软删除，可在回收站恢复）',
-    inputSchema: {
-      type: 'object',
-      properties: { chapterId: { type: 'string' } },
-      required: ['chapterId'],
-    },
-  },
-  {
-    name: 'ai_continue',
-    description: '调用软件内置 AI 续写章节并自动追加保存（使用软件中配置的模型）',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        chapterId: { type: 'string' },
-        instruction: { type: 'string', description: '补充要求（可选）' },
-      },
-      required: ['chapterId'],
-    },
-  },
-  {
-    name: 'ai_review',
-    description: '调用软件内置 AI 审稿（逻辑/时间线/人物一致性/伏笔/文笔），返回报告',
-    inputSchema: {
-      type: 'object',
-      properties: { chapterId: { type: 'string' } },
-      required: ['chapterId'],
-    },
-  },
-  {
-    name: 'ai_outline',
-    description: '用一句话创意生成 N 章大纲并写入作品的大纲树',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        workId: { type: 'string' },
-        premise: { type: 'string', description: '一句话创意' },
-        chapterCount: { type: 'number', description: '章节数（默认 10）' },
-      },
-      required: ['workId', 'premise'],
-    },
-  },
-  {
-    name: 'search',
-    description: '跨作品全文搜索章节标题与正文',
-    inputSchema: {
-      type: 'object',
-      properties: { query: { type: 'string' } },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'work_stats',
-    description: '作品统计（章节数/总字数）',
-    inputSchema: {
-      type: 'object',
-      properties: { workId: { type: 'string' } },
-      required: ['workId'],
-    },
-  },
+  T('list_works', '列出全部作品（含章节数/总字数）', {}, undefined),
+  T('create_work', '创建新作品', {
+    title: { type: 'string' },
+    type: { type: 'string', enum: ['novel', 'script'], description: '小说/短剧，默认 novel' },
+  }, ['title']),
+  T('update_work', '修改作品标题/描述', {
+    workId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
+  }, ['workId']),
+  T('delete_work', '删除作品（软删除，可在软件回收站恢复）', { workId: { type: 'string' } }, ['workId']),
+
+  T('list_chapters', '列出作品的章节（含字数）', { workId: { type: 'string' } }, ['workId']),
+  T('read_chapter', '读取章节全文（plainText 适合阅读）', { chapterId: { type: 'string' } }, ['chapterId']),
+  T('create_chapter', '创建章节（content 接受纯文本，自动分段）', {
+    workId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' },
+  }, ['workId', 'title']),
+  T('write_chapter', '整章替换正文（先读后写；大改前先 save_chapter_version）', {
+    chapterId: { type: 'string' }, content: { type: 'string' },
+  }, ['chapterId', 'content']),
+  T('delete_chapter', '删除章节（软删除）', { chapterId: { type: 'string' } }, ['chapterId']),
+
+  T('get_outline', '读取大纲树（幕/场景/事件节点，含 AI 生成的）', { workId: { type: 'string' } }, ['workId']),
+  T('delete_outline_node', '删除大纲节点', { nodeId: { type: 'string' } }, ['nodeId']),
+
+  T('list_characters', '列出角色（含性格与关系）', { workId: { type: 'string' } }, ['workId']),
+  T('create_character', '创建角色', {
+    workId: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' },
+    avatar: { type: 'string', description: 'emoji' }, personality: { type: 'string' }, relationships: { type: 'string' },
+  }, ['workId', 'name']),
+
+  T('list_scenes', '列出场景', { workId: { type: 'string' } }, ['workId']),
+  T('create_scene', '创建场景', {
+    workId: { type: 'string' }, name: { type: 'string' }, location: { type: 'string' },
+    timeOfDay: { type: 'string', enum: ['morning', 'noon', 'evening', 'night', 'other'] },
+    mood: { type: 'string' }, description: { type: 'string' },
+  }, ['workId', 'name']),
+
+  T('list_world_settings', '列出世界观设定', { workId: { type: 'string' } }, ['workId']),
+  T('create_world_setting', '创建世界观设定', {
+    workId: { type: 'string' }, title: { type: 'string' }, content: { type: 'string' },
+    category: { type: 'string', enum: ['location', 'organization', 'event', 'culture', 'technology', 'magic'] },
+  }, ['workId', 'title']),
+
+  T('list_clues', '列出伏笔（含铺设/回收场景关联）', { workId: { type: 'string' } }, ['workId']),
+  T('create_clue', '登记伏笔', {
+    workId: { type: 'string' }, name: { type: 'string' }, description: { type: 'string' },
+  }, ['workId', 'name']),
+  T('resolve_clue', '标记伏笔状态', {
+    clueId: { type: 'string' }, status: { type: 'string', enum: ['open', 'resolved'] },
+  }, ['clueId', 'status']),
+
+  T('list_conflicts', '列出冲突（类型/强度/状态）', { workId: { type: 'string' } }, ['workId']),
+  T('create_conflict', '登记冲突', {
+    workId: { type: 'string' }, name: { type: 'string' },
+    type: { type: 'string', enum: ['character', 'environment', 'internal', 'social'] },
+    intensity: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+    status: { type: 'string', enum: ['active', 'escalating', 'resolving', 'resolved'] },
+    characters: { type: 'string', description: '涉及角色，逗号分隔' },
+    description: { type: 'string' }, resolution: { type: 'string' },
+  }, ['workId', 'name']),
+
+  T('list_storyboards', '列出分镜（含章节关联/时长）', { workId: { type: 'string' } }, ['workId']),
+  T('list_submissions', '列出投递台账（哪章投了哪个平台）', { workId: { type: 'string' } }, ['workId']),
+
+  T('ai_continue', '软件 AI 续写章节并自动追加保存', {
+    chapterId: { type: 'string' }, instruction: { type: 'string', description: '补充要求（可选）' },
+  }, ['chapterId']),
+  T('ai_review', '软件 AI 审稿（逻辑/时间线/人物/伏笔/文笔），返回报告', {
+    chapterId: { type: 'string' },
+  }, ['chapterId']),
+  T('ai_summary', '软件 AI 生成章节梗概（不改动正文）', { chapterId: { type: 'string' } }, ['chapterId']),
+  T('ai_outline', '一句话创意生成 N 章大纲并写入大纲树', {
+    workId: { type: 'string' }, premise: { type: 'string' }, chapterCount: { type: 'number' },
+  }, ['workId', 'premise']),
+  T('ai_gen_characters', '软件 AI 批量生成角色并入库', {
+    workId: { type: 'string' }, premise: { type: 'string' }, count: { type: 'number' },
+  }, ['workId', 'premise']),
+  T('ai_gen_scenes', '软件 AI 批量生成场景并入库', {
+    workId: { type: 'string' }, premise: { type: 'string' }, count: { type: 'number' },
+  }, ['workId', 'premise']),
+  T('ai_detect_clues', '软件 AI 通读全书检测伏笔并入库', { workId: { type: 'string' } }, ['workId']),
+  T('ai_gen_storyboards', '软件 AI 为章节生成分镜并入库', { chapterId: { type: 'string' } }, ['chapterId']),
+
+  T('export_work', '导出作品为文件（savePath 传绝对路径）', {
+    workId: { type: 'string' },
+    format: { type: 'string', enum: ['txt', 'markdown', 'html', 'word', 'epub', 'script'] },
+    savePath: { type: 'string', description: '如 C:/Users/x/Desktop/book.epub' },
+    chapterId: { type: 'string', description: '可选，仅导该章' },
+    author: { type: 'string' },
+  }, ['workId', 'format', 'savePath']),
+  T('import_text', '导入整本 TXT 自动分章建书', {
+    title: { type: 'string' }, text: { type: 'string' }, type: { type: 'string', enum: ['novel', 'script'] },
+  }, ['title', 'text']),
+
+  T('list_chapter_versions', '列出章节版本快照', { chapterId: { type: 'string' } }, ['chapterId']),
+  T('save_chapter_version', '保存章节版本快照（agent 大改前务必先调用）', {
+    chapterId: { type: 'string' }, label: { type: 'string', description: '如"agent 改稿前"' },
+  }, ['chapterId']),
+
+  T('search', '跨作品全文搜索', { query: { type: 'string' } }, ['query']),
+  T('work_stats', '作品统计（章节数/总字数）', { workId: { type: 'string' } }, ['workId']),
 ];
 
-/** 工具调用 → REST */
 async function callTool(name, args) {
   const req = (method, path, body) =>
     fetch(API_BASE + path, {
@@ -159,14 +137,40 @@ async function callTool(name, args) {
   switch (name) {
     case 'list_works': return req('GET', '/api/works');
     case 'create_work': return req('POST', '/api/works', { title: args.title, type: args.type || 'novel' });
+    case 'update_work': return req('PUT', `/api/works/${args.workId}`, args);
+    case 'delete_work': return req('DELETE', `/api/works/${args.workId}`);
     case 'list_chapters': return req('GET', `/api/works/${args.workId}/chapters`);
     case 'read_chapter': return req('GET', `/api/chapters/${args.chapterId}`);
     case 'create_chapter': return req('POST', '/api/chapters', args);
     case 'write_chapter': return req('PUT', `/api/chapters/${args.chapterId}/content`, { content: args.content });
     case 'delete_chapter': return req('DELETE', `/api/chapters/${args.chapterId}`);
+    case 'get_outline': return req('GET', `/api/works/${args.workId}/outline`);
+    case 'delete_outline_node': return req('DELETE', `/api/outline/${args.nodeId}`);
+    case 'list_characters': return req('GET', `/api/works/${args.workId}/characters`);
+    case 'create_character': return req('POST', `/api/works/${args.workId}/characters`, args);
+    case 'list_scenes': return req('GET', `/api/works/${args.workId}/scenes`);
+    case 'create_scene': return req('POST', `/api/works/${args.workId}/scenes`, args);
+    case 'list_world_settings': return req('GET', `/api/works/${args.workId}/world-settings`);
+    case 'create_world_setting': return req('POST', `/api/works/${args.workId}/world-settings`, args);
+    case 'list_clues': return req('GET', `/api/works/${args.workId}/clues`);
+    case 'create_clue': return req('POST', `/api/works/${args.workId}/clues`, args);
+    case 'resolve_clue': return req('PUT', `/api/clues/${args.clueId}/status`, { status: args.status });
+    case 'list_conflicts': return req('GET', `/api/works/${args.workId}/conflicts`);
+    case 'create_conflict': return req('POST', `/api/works/${args.workId}/conflicts`, args);
+    case 'list_storyboards': return req('GET', `/api/works/${args.workId}/storyboards`);
+    case 'list_submissions': return req('GET', `/api/works/${args.workId}/submissions`);
     case 'ai_continue': return req('POST', `/api/ai/continue/${args.chapterId}`, { instruction: args.instruction || '' });
     case 'ai_review': return req('POST', `/api/ai/review/${args.chapterId}`);
+    case 'ai_summary': return req('POST', `/api/ai/summary/${args.chapterId}`);
     case 'ai_outline': return req('POST', '/api/ai/outline', args);
+    case 'ai_gen_characters': return req('POST', '/api/ai/characters', args);
+    case 'ai_gen_scenes': return req('POST', '/api/ai/scenes', args);
+    case 'ai_detect_clues': return req('POST', `/api/ai/detect-clues/${args.workId}`);
+    case 'ai_gen_storyboards': return req('POST', `/api/ai/storyboards/${args.chapterId}`);
+    case 'export_work': return req('POST', '/api/export', args);
+    case 'import_text': return req('POST', '/api/import', args);
+    case 'list_chapter_versions': return req('GET', `/api/chapters/${args.chapterId}/versions`);
+    case 'save_chapter_version': return req('POST', `/api/chapters/${args.chapterId}/versions`, { label: args.label || 'agent 快照' });
     case 'search': return req('GET', `/api/search?q=${encodeURIComponent(args.query)}`);
     case 'work_stats': return req('GET', `/api/stats/${args.workId}`);
     default: throw new Error(`未知工具: ${name}`);
@@ -209,15 +213,13 @@ async function handle(msg) {
         });
         break;
       case 'notifications/initialized':
-        break; // 无回复
+        break;
       case 'tools/list':
         reply({ tools: TOOLS });
         break;
       case 'tools/call': {
         const result = await callTool(msg.params.name, msg.params.arguments || {});
-        reply({
-          content: [{ type: 'text', text: String(result).slice(0, 50000) }],
-        });
+        reply({ content: [{ type: 'text', text: String(result).slice(0, 50000) }] });
         break;
       }
       case 'ping':
@@ -227,8 +229,6 @@ async function handle(msg) {
         if (msg.id !== undefined) replyErr(-32601, `未知方法: ${msg.method}`);
     }
   } catch (e) {
-    if (msg.id !== undefined) {
-      replyErr(-32000, e.message);
-    }
+    if (msg.id !== undefined) replyErr(-32000, e.message);
   }
 }

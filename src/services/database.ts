@@ -778,7 +778,26 @@ async function migrateToV5(instance: Database): Promise<void> {
     ON submissions(work_id, created_at DESC)
   `);
 
-  console.log('✅ v5 迁移完成（投递台账）');
+  // world_settings 表此前由前端服务懒创建，纳入迁移保证 API/全新环境可用
+  await instance.execute(`
+    CREATE TABLE IF NOT EXISTS world_settings (
+      id TEXT PRIMARY KEY NOT NULL,
+      work_id TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'location',
+      title TEXT NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      icon_type TEXT,
+      icon_color TEXT,
+      tags TEXT NOT NULL DEFAULT '[]',
+      related_characters TEXT NOT NULL DEFAULT '[]',
+      related_settings TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+
+  console.log('✅ v5 迁移完成（投递台账 + world_settings 兜底）');
 }
 
 /**
