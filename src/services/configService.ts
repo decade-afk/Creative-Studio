@@ -80,6 +80,19 @@ export interface AppConfig {
     lastBackupAt?: string;
   };
 
+  /** 存储设置 */
+  storage: {
+    /**
+     * 数据存储根目录（数据库/备份/素材）
+     *
+     * 【说明】空串 = 默认应用数据目录（%APPDATA%\com.creativestudio.desktop）。
+     * config.json 本身永远留在应用数据目录作为引导配置（否则死锁：
+     * 自定义路径存在 config 里，config 又在自定义路径里）。
+     * 修改后需迁移数据并重启（见 SettingsView 存储 Tab）。
+     */
+    dataDir: string;
+  };
+
   /** AI 服务配置 */
   ai: {
     /** 服务商预设 ID（kimi | deepseek | glm | openai | openrouter | lmstudio | ollama | custom） */
@@ -135,6 +148,9 @@ const DEFAULT_CONFIG: AppConfig = {
     enabled: true,
     interval: 24,
     keepCount: 7,
+  },
+  storage: {
+    dataDir: '',
   },
   ai: {
     provider: 'kimi',
@@ -323,4 +339,23 @@ function mergeWithDefaults(
   defaultConfig: AppConfig
 ): AppConfig {
   return deepMerge(defaultConfig, userConfig);
+}
+
+
+/**
+ * 获取数据存储根目录（数据库/备份/素材所在）
+ *
+ * 【规则】storage.dataDir 为空 → 默认应用数据目录；非空 → 用户自定义目录
+ * config.json 永远在应用数据目录（引导配置）
+ */
+export async function getStorageDir(): Promise<string> {
+  try {
+    const config = await loadConfig();
+    if (config.storage && config.storage.dataDir) {
+      return config.storage.dataDir;
+    }
+  } catch {
+    // 配置读取失败回退默认
+  }
+  return await appDataDir();
 }

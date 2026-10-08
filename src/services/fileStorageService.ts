@@ -26,7 +26,7 @@
  *         │   └── <file_id>.ext
  */
 
-import { appDataDir, join } from '@tauri-apps/api/path';
+import { join } from '@tauri-apps/api/path';
 import {
   exists,
   mkdir,
@@ -37,6 +37,7 @@ import {
 } from '@tauri-apps/plugin-fs';
 import { open, save } from '@tauri-apps/plugin-dialog';
 import { generateUUID } from './database';
+import { getStorageDir } from './configService';
 import type { Asset, AssetType } from '../types/storage';
 import { createAsset, deleteAsset } from './assetService';
 
@@ -101,8 +102,8 @@ const MIME_TYPE_MAP: Record<string, string> = {
  * 获取资源根目录路径
  */
 async function getAssetsDir(): Promise<string> {
-  // appDataDir() 不带尾部分隔符，必须用 join 拼接
-  return await join(await appDataDir(), ASSETS_DIR);
+  // 存储根目录由 storage.dataDir 决定（默认应用数据目录）
+  return await join(await getStorageDir(), ASSETS_DIR);
 }
 
 /**

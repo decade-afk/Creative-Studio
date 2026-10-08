@@ -15,6 +15,8 @@
  */
 
 import Database from '@tauri-apps/plugin-sql';
+import { join } from '@tauri-apps/api/path';
+import { getStorageDir } from './configService';
 
 /**
  * 数据库实例
@@ -31,10 +33,18 @@ let db: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
 /**
- * 数据库文件路径
- * 存储在应用数据目录下的 creative-studio.db
+ * 构建数据库连接串
+ *
+ * 【存储位置】跟随配置的 storage.dataDir（默认应用数据目录）。
+ * plugin-sql 对绝对路径直接透传给 sqlx（相对路径才拼 app_config_dir），
+ * 因此自定义目录传绝对路径即可。
  */
-const DB_PATH = 'sqlite:creative-studio.db';
+async function buildDbPath(): Promise<string> {
+  const dir = await getStorageDir();
+  const file = await join(dir, 'creative-studio.db');
+  // 正斜杠避免连接串解析歧义
+  return `sqlite:${file.replace(/\\/g, '/')}`;
+}
 
 /**
  * 当前数据库schema版本号
@@ -70,9 +80,10 @@ export async function getDatabase(): Promise<Database> {
 
   initPromise = (async () => {
     try {
-      // 首次访问，加载数据库
-      const instance = await Database.load(DB_PATH);
-      console.log('✅ 数据库加载成功:', DB_PATH);
+      // 首次访问，加载数据库（路径由存储配置决定）
+      const dbPath = await buildDbPath();
+      const instance = await Database.load(dbPath);
+      console.log('✅ 数据库加载成功:', dbPath);
 
       // 初始化数据库表结构
       await initializeDatabase(instance);
@@ -968,4 +979,15 @@ export async function updateWithOptimisticLock(
 
   console.log(`✅ 使用乐观锁更新 ${table} 成功 (v${currentVersion} -> v${currentVersion + 1})`);
   return true;
+}
+
+
+/**
+ * 重置数据库连接（不关闭——供存储迁移后强制下次重新加载新路径用）
+ * 迁移流程：先 closeDatabase() 落盘，移动文件，再调用本函数清空缓存
+ */
+export function resetDatabaseConnection(): void {
+  db = null;
+  initPromise = null;
+  console.log('♻️ 数据库连接缓存已重置（下次 getDatabase 按新存储路径加载）');
 }

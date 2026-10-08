@@ -20,10 +20,10 @@
  *   避免替换失败导致备份和主库同时损坏
  */
 
-import { appDataDir, join } from '@tauri-apps/api/path';
+import { join } from '@tauri-apps/api/path';
 import { copyFile, exists, mkdir, readDir, remove, rename, stat } from '@tauri-apps/plugin-fs';
 import { closeDatabase, getDatabase } from './database';
-import { loadConfig, updateConfig } from './configService';
+import { loadConfig, updateConfig, getStorageDir } from './configService';
 
 // ============================================================================
 // 常量
@@ -62,7 +62,7 @@ export interface BackupInfo {
  * @returns 备份目录完整路径
  */
 async function getBackupDir(): Promise<string> {
-  const dir = await join(await appDataDir(), BACKUP_DIR_NAME);
+  const dir = await join(await getStorageDir(), BACKUP_DIR_NAME);
   if (!(await exists(dir))) {
     await mkdir(dir, { recursive: true });
   }
@@ -233,7 +233,7 @@ export async function restoreBackup(name: string): Promise<void> {
   // 1. 关闭数据库连接，释放文件句柄
   await closeDatabase();
 
-  const dbPath = await join(await appDataDir(), DB_FILE_NAME);
+  const dbPath = await join(await getStorageDir(), DB_FILE_NAME);
   const restoringPath = `${dbPath}.restoring`;
 
   try {

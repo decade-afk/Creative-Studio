@@ -35,10 +35,20 @@ use std::collections::HashMap;
 
 /** 数据库文件路径（appdata/creative-studio.db） */
 fn db_path(app: &tauri::AppHandle) -> Result<String, String> {
-    let dir = app
+    // 存储根目录优先读 config.json 的 storage.dataDir（与前端一致），空则回退 appDataDir
+    let mut dir = app
         .path()
         .app_data_dir()
         .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
+    if let Ok(config_raw) = std::fs::read_to_string(dir.join("config.json")) {
+        if let Ok(config) = serde_json::from_str::<serde_json::Value>(&config_raw) {
+            if let Some(custom) = config["storage"]["dataDir"].as_str() {
+                if !custom.is_empty() {
+                    dir = std::path::PathBuf::from(custom);
+                }
+            }
+        }
+    }
     Ok(dir.join("creative-studio.db").to_string_lossy().to_string())
 }
 

@@ -133,6 +133,14 @@
     "core:window:allow-scale-factor",
     "core:window:allow-cursor-position",
     "clipboard-manager:allow-write-text",
-    "clipboard-manager:allow-read-text"
+    "clipboard-manager:allow-read-text",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
+    }
   ]
 }

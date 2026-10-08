@@ -29,6 +29,8 @@ import {
   saveConfig,
   type AppConfig,
 } from '../services/configService';
+import { getCurrentStorageDir, isDefaultLocation, pickStorageDir, migrateStorage, resetToDefault } from '../services/storageService';
+import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import {
   createBackup,
   deleteBackup,
@@ -57,7 +59,7 @@ import {
 } from '../services/shortcutService';
 
 // 设置选项卡类型
-type SettingsTab = 'profile' | 'appearance' | 'ai' | 'editor' | 'shortcuts' | 'export' | 'backup' | 'about';
+type SettingsTab = 'profile' | 'appearance' | 'ai' | 'editor' | 'shortcuts' | 'export' | 'backup' | 'storage' | 'about';
 
 // 组件属性接口
 interface SettingsViewProps {
@@ -317,6 +319,16 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
               onClick={() => setActiveTab('backup')}
             />
 
+            {/* 存储 */}
+            <TabButton
+              icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+              </svg>}
+              label="存储"
+              active={activeTab === 'storage'}
+              onClick={() => setActiveTab('storage')}
+            />
+
             {/* 关于 */}
             <TabButton
               icon={<svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -341,6 +353,7 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
               {activeTab === 'shortcuts' && '快捷键配置'}
               {activeTab === 'export' && '导出设置'}
               {activeTab === 'backup' && '备份设置'}
+              {activeTab === 'storage' && '数据存储'}
               {activeTab === 'about' && '关于'}
             </h3>
             <button
@@ -398,6 +411,9 @@ export default function SettingsView({ onClose }: SettingsViewProps) {
               {activeTab === 'backup' && (
                 <BackupTab config={config} setConfig={setConfig} onNotify={showToast} />
               )}
+
+              {/* 存储 Tab */}
+              {activeTab === 'storage' && <StorageTab onNotify={showToast} />}
 
               {/* 关于 Tab */}
               {activeTab === 'about' && <AboutTab />}
@@ -1399,6 +1415,110 @@ function AboutTab() {
           <p>© 2025 Creative Studio. All rights reserved.</p>
           <p className="mt-1">Open source project under MIT License</p>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ========== 存储 Tab ==========
+function StorageTab({ onNotify }: { onNotify: (msg: string, type?: 'success' | 'error' | 'warning' | 'info') => void }) {
+  const [currentDir, setCurrentDir] = useState('');
+  const [isDefault, setIsDefault] = useState(true);
+  const [migrating, setMigrating] = useState(false);
+
+  useEffect(() => {
+    getCurrentStorageDir().then(setCurrentDir).catch(() => undefined);
+    isDefaultLocation().then(setIsDefault).catch(() => undefined);
+  }, []);
+
+  const handlePick = async () => {
+    const dir = await pickStorageDir();
+    if (!dir) return; // 取消或选了应用数据目录
+    const confirmed = await ask(
+      `将把全部小说数据（数据库、备份、素材）迁移到：\n\n${dir}\n\n旧位置的数据会保留作为备份。迁移后建议重启应用。确定继续？`,
+      { title: '迁移数据', kind: 'info' }
+    );
+    if (!confirmed) return;
+
+    setMigrating(true);
+    try {
+      const result = await migrateStorage(dir);
+      setCurrentDir(dir);
+      setIsDefault(false);
+      onNotify(
+        `迁移完成（${result.moved.length} 项${result.skipped.length ? `，跳过 ${result.skipped.length} 项` : ''}），建议重启应用以完全生效`,
+        'success'
+      );
+    } catch (error: any) {
+      onNotify(error.message || '迁移失败', 'error');
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  const handleReset = async () => {
+    const confirmed = await ask('把数据移回默认位置（应用数据目录）？旧位置数据保留。', { title: '恢复默认', kind: 'info' });
+    if (!confirmed) return;
+    setMigrating(true);
+    try {
+      await resetToDefault();
+      setCurrentDir(await getCurrentStorageDir());
+      setIsDefault(true);
+      onNotify('已恢复默认位置，建议重启应用', 'success');
+    } catch (error: any) {
+      onNotify(error.message || '操作失败', 'error');
+    } finally {
+      setMigrating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="p-4 bg-primary-50 rounded-lg border border-primary-200 text-sm text-on-surface-secondary">
+        小说正文、大纲、角色、备份与素材全部存储在下面的位置。config.json（界面设置）始终保留在系统应用数据目录。
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-on-surface mb-2">当前存储位置</label>
+        <div className="flex items-center gap-2">
+          <code className="flex-1 px-3 py-2 bg-surface-secondary border border-outline rounded-lg text-xs text-on-surface break-all">
+            {currentDir || '加载中…'}
+          </code>
+          <button
+            onClick={() => currentDir && revealItemInDir(currentDir).catch(() => onNotify('打开失败', 'error'))}
+            className="px-3 py-2 text-xs rounded-lg border border-outline text-on-surface hover:bg-surface-secondary whitespace-nowrap"
+          >
+            打开文件夹
+          </button>
+        </div>
+        <p className="mt-2 text-xs text-on-surface-secondary">
+          {isDefault ? '当前使用系统默认位置' : '当前使用自定义位置'}
+        </p>
+      </div>
+
+      <div className="flex gap-3">
+        <button
+          onClick={handlePick}
+          disabled={migrating}
+          className="px-4 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50"
+        >
+          {migrating ? '迁移中…' : '更改位置并迁移数据…'}
+        </button>
+        {!isDefault && (
+          <button
+            onClick={handleReset}
+            disabled={migrating}
+            className="px-4 py-2 text-sm rounded-lg border border-outline text-on-surface hover:bg-surface-secondary disabled:opacity-50"
+          >
+            恢复默认位置
+          </button>
+        )}
+      </div>
+
+      <div className="p-4 bg-surface-secondary rounded-lg border border-outline text-xs text-on-surface-secondary space-y-1">
+        <p>· 迁移采用复制而非移动——旧位置数据完整保留，可随时切回</p>
+        <p>· 迁移包含：creative-studio.db（数据库）、backups/（备份）、assets/（素材）</p>
+        <p>· 迁移后建议重启应用，让所有组件加载新路径</p>
       </div>
     </div>
   );
