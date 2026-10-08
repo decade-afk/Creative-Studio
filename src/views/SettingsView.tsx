@@ -1340,7 +1340,7 @@ function AboutTab() {
       <div className="text-center mb-10">
         <div className="text-6xl mb-4">🎬</div>
         <h3 className="text-2xl font-bold text-on-surface mb-2">Creative Studio</h3>
-        <p className="text-sm text-on-surface-secondary mb-6">版本 0.3.2</p>
+        <p className="text-sm text-on-surface-secondary mb-6">版本 0.3.3</p>
         <p className="text-sm text-on-surface-secondary max-w-md mx-auto mb-8">
           专业创作工作室，支持剧本创作、大纲管理、分镜生成等功能
         </p>

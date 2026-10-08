@@ -1,6 +1,6 @@
 [package]
 name = "creative-studio-desktop"
-version = "0.3.2"
+version = "0.3.3"
 description = "Creative Studio Desktop Application"
 authors = ["you"]
 license = "MIT"
