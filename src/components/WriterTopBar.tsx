@@ -1,15 +1,19 @@
 /**
  * WriterTopBar - 编辑器顶部栏组件
  *
- * 拆分自 WriterView，负责显示当前作品/章节路径、字数统计和操作按钮
+ * 功能：
+ * 1. 作品/章节快速切换下拉（面包屑样式，点击弹出面板选择）
+ * 2. 字数统计（本章/全书/今日目标）
+ * 3. 标题/内容复制快捷按钮
+ * 4. 版本历史、AI 助手、分镜、导出入口
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useWriterStore } from '../stores/writerStore';
-import { getWorkTotalWordCount } from '../services/chapterService';
+import { getWorkTotalWordCount, updateChapter } from '../services/chapterService';
 import { loadConfig } from '../services/configService';
 import { getTodayWords } from '../utils/dailyWords';
-
+import { calculateWordCount } from '../utils/wordCount';
 interface WriterTopBarProps {
   onToggleDrawer: () => void;
   onShowExportDialog: () => void;
@@ -23,6 +27,8 @@ interface WriterTopBarProps {
   onCopyTitle: () => void;
   /** 复制本章内容 */
   onCopyContent: () => void;
+  /** 编辑器引用（切换章节前保存正文用） */
+  editorRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 export default function WriterTopBar({
@@ -33,12 +39,62 @@ export default function WriterTopBar({
   aiPanelOpen,
   onCopyTitle,
   onCopyContent,
+  editorRef,
 }: WriterTopBarProps) {
-  const { currentWorkId, currentChapterId, getCurrentWork, getCurrentChapter } = useWriterStore();
+  const {
+    works,
+    chapters,
+    currentWorkId,
+    currentChapterId,
+    getCurrentWork,
+    getCurrentChapter,
+    setCurrentWorkId,
+    setCurrentChapterId,
+    setShouldSyncContent,
+    setEditorContent,
+    setWordCount,
+  } = useWriterStore();
   const wordCount = useWriterStore((state) => state.wordCount);
 
   const currentWork = getCurrentWork();
   const currentChapter = getCurrentChapter();
+
+  // 作品/章节快速切换下拉
+  const [openMenu, setOpenMenu] = useState<'work' | 'chapter' | null>(null);
+  const menuWrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (menuWrapRef.current && !menuWrapRef.current.contains(e.target as Node)) {
+        setOpenMenu(null);
+      }
+    };
+    window.addEventListener('mousedown', handler);
+    return () => window.removeEventListener('mousedown', handler);
+  }, []);
+
+  /** 切换作品：换 id 即可，WriterView 的 effect 会加载章节 */
+  const handleWorkSwitch = (workId: string) => {
+    if (workId !== currentWorkId) setCurrentWorkId(workId);
+    setOpenMenu(null);
+  };
+
+  /** 切换章节：带切换前保存逻辑同侧栏 */
+  const handleChapterSwitch = (chapterId: string) => {
+    if (chapterId === currentChapterId) { setOpenMenu(null); return; }
+    if (editorRef?.current && currentChapterId) {
+      const content = editorRef.current.innerHTML;
+      updateChapter(currentChapterId, { content }).catch(() => undefined);
+    }
+    const ch = chapters.find(c => c.id === chapterId);
+    if (ch) {
+      setCurrentChapterId(ch.id);
+      setShouldSyncContent(true);
+      setEditorContent(ch.content || '');
+      setWordCount(calculateWordCount(ch.content || ''));
+    }
+    setOpenMenu(null);
+  };
 
   // 作品总字数（章节切换/保存后刷新）
   const [totalWords, setTotalWords] = useState<number | null>(null);
@@ -52,7 +108,6 @@ export default function WriterTopBar({
     loadConfig()
       .then((c) => setDailyGoal(c.editor.dailyGoal || 0))
       .catch(() => undefined);
-    // 设置保存后实时刷新目标
     const handler = () => {
       loadConfig()
         .then((c) => setDailyGoal(c.editor.dailyGoal || 0))
@@ -81,33 +136,54 @@ export default function WriterTopBar({
     };
   }, [currentWorkId, wordCount, saveTick]);
 
-  // 自动保存完成后刷新全书字数（保存事件由 WriterEditor/手动保存派发，
-  // 早于保存的 wordCount 变化会让 DB 查询拿到旧值，这里在保存落库后再查一次）
+  // 自动保存完成后刷新全书字数
   useEffect(() => {
     const handler = () => setSaveTick((t) => t + 1);
     window.addEventListener('creative-studio:saved', handler);
     return () => window.removeEventListener('creative-studio:saved', handler);
   }, []);
 
+  const chevron = (open: boolean) => (
+    <svg
+      className={`w-3 h-3 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+      fill="none" viewBox="0 0 24 24" stroke="currentColor"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+    </svg>
+  );
+
   return (
-    <div className="h-16 border-b border-outline flex items-center justify-between px-8 bg-surface-primary flex-shrink-0">
-      {/* 左侧：路径与字数 */}
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="flex items-center gap-2 text-sm min-w-0">
-          <span className="text-on-surface-secondary font-medium truncate">
-            {currentWork?.title || '未选择作品'}
-          </span>
-          {currentChapterId && (
-            <>
-              <svg className="w-4 h-4 text-neutral-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-              <span className="text-on-surface font-semibold truncate">
-                {currentChapter?.title || ''}
-              </span>
-            </>
-          )}
-        </div>
+    <div className="relative h-16 border-b border-outline flex items-center justify-between px-8 bg-surface-primary flex-shrink-0">
+      {/* 左侧：面包屑 + 字数 + 复制 */}
+      <div ref={menuWrapRef} className="flex items-center gap-3 min-w-0 relative">
+        {/* 作品下拉触发 */}
+        <button
+          onClick={() => setOpenMenu(openMenu === 'work' ? null : 'work')}
+          disabled={works.length === 0}
+          className="flex items-center gap-1.5 text-sm text-on-surface-secondary font-medium hover:text-on-surface transition-colors disabled:opacity-50 max-w-[180px]"
+          title="切换作品"
+        >
+          <span className="truncate">{currentWork?.title || '未选择作品'}</span>
+          {chevron(openMenu === 'work')}
+        </button>
+
+        {currentChapterId && (
+          <>
+            <svg className="w-4 h-4 text-neutral-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+            {/* 章节下拉触发 */}
+            <button
+              onClick={() => setOpenMenu(openMenu === 'chapter' ? null : 'chapter')}
+              className="flex items-center gap-1 text-on-surface font-semibold hover:text-primary-600 transition-colors max-w-[200px]"
+              title="切换章节"
+            >
+              <span className="truncate">{currentChapter?.title || ''}</span>
+              {chevron(openMenu === 'chapter')}
+            </button>
+          </>
+        )}
+
         {totalWords !== null && (
           <span className="text-xs text-on-surface-secondary whitespace-nowrap">
             本章 {wordCount} 字 · 全书 {totalWords} 字
@@ -118,8 +194,9 @@ export default function WriterTopBar({
             )}
           </span>
         )}
+
         {/* 标题 / 内容 复制 */}
-        <span className="flex items-center gap-1 whitespace-nowrap">
+        <span className="flex items-center gap-1 whitespace-nowrap shrink-0">
           <button
             onClick={onCopyTitle}
             disabled={!currentChapter}
@@ -185,12 +262,59 @@ export default function WriterTopBar({
             disabled={!currentWorkId}
           >
             <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632 3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
             </svg>
             <span>导出</span>
           </button>
         </div>
       </div>
+
+      {/* 作品切换面板 */}
+      {openMenu === 'work' && (
+        <div className="absolute top-full left-8 mt-1 w-64 max-h-80 overflow-y-auto bg-surface-primary border border-outline rounded-lg shadow-lg z-50 py-1">
+          {works.length === 0 && (
+            <p className="text-sm text-on-surface-secondary text-center py-4">暂无作品</p>
+          )}
+          {works.map((w) => (
+            <button
+              key={w.id}
+              onClick={() => handleWorkSwitch(w.id)}
+              className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                w.id === currentWorkId
+                  ? 'bg-primary-50 text-primary-700 font-medium'
+                  : 'text-on-surface hover:bg-surface-secondary'
+              }`}
+            >
+              <span>{w.icon}</span>
+              <span className="flex-1 truncate">{w.title}</span>
+              {w.id === currentWorkId && <span className="text-primary-600">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* 章节切换面板 */}
+      {openMenu === 'chapter' && (
+        <div className="absolute top-full left-8 mt-9 w-72 max-h-80 overflow-y-auto bg-surface-primary border border-outline rounded-lg shadow-lg z-50 py-1">
+          {chapters.length === 0 && (
+            <p className="text-sm text-on-surface-secondary text-center py-4">当前作品暂无章节</p>
+          )}
+          {chapters.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => handleChapterSwitch(c.id)}
+              className={`w-full flex items-center justify-between px-3 py-2 text-left text-sm transition-colors ${
+                c.id === currentChapterId
+                  ? 'bg-primary-50 text-primary-700 font-medium'
+                  : 'text-on-surface hover:bg-surface-secondary'
+              }`}
+            >
+              <span className="truncate">{c.title}</span>
+              {c.id === currentChapterId && <span className="text-primary-600">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
