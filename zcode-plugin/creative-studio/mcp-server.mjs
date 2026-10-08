@@ -146,20 +146,45 @@ async function apiReady(timeoutMs = 2000) {
   }
 }
 
-/** 候选应用路径（按优先级）：环境变量 > release > debug > 常见安装位置 */
+/** 从卸载注册表查安装的主程序路径（NSIS 安装写入 DisplayIcon，含完整 exe 路径） */
+function installExeFromRegistry() {
+  try {
+    const { execSync } = require('node:child_process');
+    const cmd = [
+      'powershell -NoProfile -Command "',
+      "Get-ItemProperty 'HKCU:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*',",
+      "'HKLM:/Software/Microsoft/Windows/CurrentVersion/Uninstall/*'",
+      " -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -eq 'Creative Studio' }",
+      ' | Select-Object -ExpandProperty DisplayIcon"',
+    ].join(' ');
+    const out = execSync(cmd, {
+      timeout: 8000,
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'ignore'],
+    }).trim();
+    const exe = out.split(/\r?\n/)[0].replace(/^"|"$/g, '');
+    if (exe && existsSync(exe)) return exe;
+  } catch {}
+  return null;
+}
+
+/** 候选应用路径（按优先级）：环境变量 > 注册表安装位置 > 常见安装目录 > 仓库构建产物 */
 function findAppExe() {
   const candidates = [];
   if (process.env.CS_APP_PATH) candidates.push(process.env.CS_APP_PATH);
-  // 本仓库构建产物
-  candidates.push('D:/Code/创作中心/src-tauri/target/release/creative-studio-desktop.exe');
-  candidates.push('D:/Code/创作中心/src-tauri/target/debug/creative-studio-desktop.exe');
-  // NSIS 默认安装位置（CurrentUser / AllUsers）
+  // 已安装版本优先（正式写作环境）
+  const fromReg = installExeFromRegistry();
+  if (fromReg) candidates.push(fromReg);
   const home = process.env.USERPROFILE || process.env.HOME || '';
   if (home) {
-    candidates.push(home + '/AppData/Local/Programs/Creative Studio/Creative Studio.exe');
-    candidates.push(home + '/AppData/Local/Creative Studio/Creative Studio.exe');
+    candidates.push(home + '/AppData/Local/Programs/Creative Studio/creative-studio-desktop.exe');
+    candidates.push(home + '/AppData/Local/Creative Studio/creative-studio-desktop.exe');
   }
-  candidates.push('C:/Program Files/Creative Studio/Creative Studio.exe');
+  candidates.push('C:/Program Files/Creative Studio/creative-studio-desktop.exe');
+  candidates.push('D:/Creative Studio/creative-studio-desktop.exe');
+  // 开发构建产物兜底
+  candidates.push('D:/Code/创作中心/src-tauri/target/release/creative-studio-desktop.exe');
+  candidates.push('D:/Code/创作中心/src-tauri/target/debug/creative-studio-desktop.exe');
   return candidates.find((p) => { try { return existsSync(p); } catch { return false; } }) || null;
 }
 
