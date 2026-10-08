@@ -35,8 +35,8 @@ export const SUBMISSION_PLATFORMS: Record<
     id: 'fanqie',
     name: '番茄小说',
     icon: '🍅',
-    consoleUrl: 'https://writer.fanqienovel.com',
-    hint: '番茄作家后台（writer.fanqienovel.com），登录后进入章节编辑页',
+    consoleUrl: 'https://fanqienovel.com/writer/zone',
+    hint: '番茄作家专区（fanqienovel.com/writer/zone），登录后进入章节编辑页',
   },
 };
 

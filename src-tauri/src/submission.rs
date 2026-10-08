@@ -20,7 +20,7 @@ fn window_label(platform: &str) -> String {
 /** 平台后台地址 */
 fn console_url(platform: &str) -> &'static str {
     match platform {
-        "fanqie" => "https://writer.fanqienovel.com",
+        "fanqie" => "https://fanqienovel.com/writer/zone",
         _ => "https://write.qq.com",
     }
 }

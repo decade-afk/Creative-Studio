@@ -45,6 +45,24 @@ const TOOLS = [
   T('delete_chapter', '删除章节（软删除）', { chapterId: { type: 'string' } }, ['chapterId']),
 
   T('get_outline', '读取大纲树（幕/场景/事件节点，含 AI 生成的）', { workId: { type: 'string' } }, ['workId']),
+  T('create_outline_node', '创建大纲节点（parentId 缺省挂根层；type 缺省：有 parentId 为 scene，否则 act；order 缺省追加到同级末尾）', {
+    workId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
+    parentId: { type: 'string', description: '父节点 id，缺省为根层' },
+    type: { type: 'string', enum: ['act', 'scene', 'event'] },
+    order: { type: 'number', description: '同级序号，缺省排同级末尾' },
+  }, ['workId', 'title']),
+  T('create_outline_batch', '批量创建大纲子树（nodes 支持嵌套 children，一次写入整卷大纲；事务内完成，任一节点非法则整体回滚）', {
+    workId: { type: 'string' },
+    nodes: {
+      type: 'array', items: { type: 'object' },
+      description: '节点 {title, description?, type?, parentId?, order?, children?: [...]}；children 依次挂到上级新建节点下',
+    },
+  }, ['workId', 'nodes']),
+  T('update_outline_node', '更新大纲节点（只改传入字段；parentId 传 null 提升为根层）', {
+    nodeId: { type: 'string' }, title: { type: 'string' }, description: { type: 'string' },
+    parentId: { type: 'string', description: '传 null 提升为根层' },
+    type: { type: 'string', enum: ['act', 'scene', 'event'] }, order: { type: 'number' },
+  }, ['nodeId']),
   T('delete_outline_node', '删除大纲节点', { nodeId: { type: 'string' } }, ['nodeId']),
 
   T('list_characters', '列出角色（含性格与关系）', { workId: { type: 'string' } }, ['workId']),
@@ -243,6 +261,12 @@ async function callTool(name, args) {
     case 'write_chapter': return req('PUT', `/api/chapters/${args.chapterId}/content`, { content: args.content });
     case 'delete_chapter': return req('DELETE', `/api/chapters/${args.chapterId}`);
     case 'get_outline': return req('GET', `/api/works/${args.workId}/outline`);
+    case 'create_outline_node': return req('POST', `/api/works/${args.workId}/outline`, args);
+    case 'create_outline_batch': return req('POST', `/api/works/${args.workId}/outline/batch`, args);
+    case 'update_outline_node': {
+      const { nodeId, ...body } = args;
+      return req('PUT', `/api/outline/${nodeId}`, body);
+    }
     case 'delete_outline_node': return req('DELETE', `/api/outline/${args.nodeId}`);
     case 'list_characters': return req('GET', `/api/works/${args.workId}/characters`);
     case 'create_character': return req('POST', `/api/works/${args.workId}/characters`, args);
@@ -307,7 +331,7 @@ async function handle(msg) {
         reply({
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'creative-studio', version: '0.3.0' },
+          serverInfo: { name: 'creative-studio', version: '0.3.1' },
         });
         break;
       case 'notifications/initialized':

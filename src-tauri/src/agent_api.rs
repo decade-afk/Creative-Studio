@@ -21,6 +21,9 @@
  * POST /api/ai/continue/:chapterId   AI 续写并追加保存 {instruction?}
  * POST /api/ai/review/:chapterId     AI 审稿，返回报告
  * POST /api/ai/outline               AI 生成大纲并入库 {workId,premise,chapterCount}
+ * POST /api/works/:id/outline        创建大纲节点 {title,description?,parentId?,type?,order?}
+ * POST /api/works/:id/outline/batch  批量创建大纲子树 {nodes:[{title,...,children?}]}
+ * PUT  /api/outline/:id              更新大纲节点 {title?,description?,type?,parentId?,order?}
  * GET  /api/search?q=                全局搜索
  * GET  /api/stats/:workId            作品统计
  */
@@ -545,8 +548,9 @@ pub fn start(app: &tauri::AppHandle) {
             // 扩展：作品管理
             .route("/api/works/{id}", axum::routing::put(update_work).delete(delete_work))
             // 扩展：规划数据
-            .route("/api/works/{id}/outline", get(get_outline))
-            .route("/api/outline/{id}", axum::routing::delete(delete_outline_node))
+            .route("/api/works/{id}/outline", get(get_outline).post(create_outline_node))
+            .route("/api/works/{id}/outline/batch", axum::routing::post(create_outline_batch))
+            .route("/api/outline/{id}", axum::routing::delete(delete_outline_node).put(update_outline_node))
             .route("/api/works/{id}/characters", get(get_characters).post(create_character))
             .route("/api/works/{id}/scenes", get(get_scenes).post(create_scene))
             .route("/api/works/{id}/world-settings", get(get_world_settings).post(create_world_setting))
@@ -665,6 +669,257 @@ async fn delete_outline_node(
     db.execute("UPDATE outline_nodes SET deleted = 1, updated_at = ?1 WHERE id = ?2", rusqlite::params![now(), id])
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
     Ok(Json(json!({ "ok": true })))
+}
+
+// ============================================================================
+// 扩展：大纲节点写入（agent 重写大纲用；与 AI 生成共用 outline_nodes 表）
+// ============================================================================
+
+/** 大纲节点类型校验（与前端 OutlineNode.type 对齐） */
+fn valid_outline_type(t: &str) -> bool {
+    matches!(t, "act" | "scene" | "event")
+}
+
+/** 计算大纲新节点的同级 order（取同级最大 +1） */
+fn next_outline_order(
+    db: &Connection,
+    work_id: &str,
+    parent_id: Option<&str>,
+) -> Result<i64, String> {
+    let max_order: i64 = match parent_id {
+        Some(pid) => db
+            .query_row(
+                "SELECT COALESCE(MAX(\"order\"), -1) FROM outline_nodes WHERE work_id = ?1 AND parent_id = ?2 AND deleted = 0",
+                rusqlite::params![work_id, pid],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("{}", e))?,
+        None => db
+            .query_row(
+                "SELECT COALESCE(MAX(\"order\"), -1) FROM outline_nodes WHERE work_id = ?1 AND parent_id IS NULL AND deleted = 0",
+                [&work_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| format!("{}", e))?,
+    };
+    Ok(max_order + 1)
+}
+
+/** 校验父节点存在且属于该作品 */
+fn ensure_parent_exists(
+    db: &Connection,
+    work_id: &str,
+    parent_id: &str,
+) -> Result<(), (StatusCode, String)> {
+    let n: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM outline_nodes WHERE id = ?1 AND work_id = ?2 AND deleted = 0",
+            rusqlite::params![parent_id, work_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    if n == 0 {
+        return Err((StatusCode::NOT_FOUND, format!("父节点不存在: {}", parent_id)));
+    }
+    Ok(())
+}
+
+async fn create_outline_node(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let title = body["title"].as_str().ok_or((StatusCode::BAD_REQUEST, "title 必填".into()))?.to_string();
+    let description = body["description"].as_str().unwrap_or("").to_string();
+    let parent_id = body["parentId"].as_str().map(|s| s.to_string());
+    let default_type = if parent_id.is_some() { "scene" } else { "act" };
+    let node_type = body["type"].as_str().unwrap_or(default_type).to_string();
+    if !valid_outline_type(&node_type) {
+        return Err((StatusCode::BAD_REQUEST, "type 仅支持 act/scene/event".into()));
+    }
+
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    if let Some(pid) = parent_id.as_deref() {
+        ensure_parent_exists(&db, &work_id, pid)?;
+    }
+    let order = match body["order"].as_i64() {
+        Some(o) => o,
+        None => next_outline_order(&db, &work_id, parent_id.as_deref())
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?,
+    };
+
+    let id = uuid();
+    let ts = now();
+    db.execute(
+        "INSERT INTO outline_nodes (id, work_id, parent_id, title, description, \"order\", type, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 0)",
+        rusqlite::params![id, work_id, parent_id, title, description, order, node_type, ts],
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    Ok(Json(json!({ "id": id, "title": title, "parentId": parent_id, "order": order, "type": node_type })))
+}
+
+async fn update_outline_node(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    // parentId：字符串 = 改挂父节点；显式 null = 提升为根节点
+    let has_parent_key = body.as_object().map(|o| o.contains_key("parentId")).unwrap_or(false);
+    if has_parent_key && !body["parentId"].is_null() {
+        let pid = body["parentId"]
+            .as_str()
+            .ok_or((StatusCode::BAD_REQUEST, "parentId 须为字符串或 null".into()))?
+            .to_string();
+        let work_id: String = db
+            .query_row(
+                "SELECT work_id FROM outline_nodes WHERE id = ?1 AND deleted = 0",
+                [&id],
+                |r| r.get(0),
+            )
+            .map_err(|_| (StatusCode::NOT_FOUND, "大纲节点不存在".into()))?;
+        ensure_parent_exists(&db, &work_id, &pid)?;
+    }
+
+    let mut sets = vec!["updated_at = ?1".to_string()];
+    let mut params: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(now())];
+    let mut idx = 2;
+    if let Some(t) = body["title"].as_str() {
+        sets.push(format!("title = ?{}", idx));
+        params.push(Box::new(t.to_string()));
+        idx += 1;
+    }
+    if let Some(d) = body["description"].as_str() {
+        sets.push(format!("description = ?{}", idx));
+        params.push(Box::new(d.to_string()));
+        idx += 1;
+    }
+    if let Some(t) = body["type"].as_str() {
+        if !valid_outline_type(t) {
+            return Err((StatusCode::BAD_REQUEST, "type 仅支持 act/scene/event".into()));
+        }
+        sets.push(format!("type = ?{}", idx));
+        params.push(Box::new(t.to_string()));
+        idx += 1;
+    }
+    if let Some(o) = body["order"].as_i64() {
+        sets.push(format!("\"order\" = ?{}", idx));
+        params.push(Box::new(o));
+        idx += 1;
+    }
+    if has_parent_key {
+        if body["parentId"].is_null() {
+            sets.push("parent_id = NULL".to_string());
+        } else {
+            let pid = body["parentId"].as_str().unwrap_or_default().to_string();
+            sets.push(format!("parent_id = ?{}", idx));
+            params.push(Box::new(pid));
+            idx += 1;
+        }
+    }
+
+    let sql = format!("UPDATE outline_nodes SET {} WHERE id = ?{} AND deleted = 0", sets.join(", "), idx);
+    params.push(Box::new(id));
+    let refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+    let n = db
+        .execute(&sql, refs.as_slice())
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    if n == 0 {
+        return Err((StatusCode::NOT_FOUND, "大纲节点不存在".into()));
+    }
+    Ok(Json(json!({ "ok": true })))
+}
+
+/// 批量创建大纲子树：nodes 支持嵌套 children，一次写入整棵大纲
+/// 节点字段：{ title, description?, type?, parentId?, order?, children?: [...] }
+async fn create_outline_batch(
+    axum::extract::State(app): axum::extract::State<AppState>,
+    Path(work_id): Path<String>,
+    Json(body): Json<Value>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let nodes = body["nodes"]
+        .as_array()
+        .ok_or((StatusCode::BAD_REQUEST, "nodes 必填（数组）".into()))?;
+    if nodes.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "nodes 不能为空".into()));
+    }
+
+    let db = conn(&app).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    db.execute_batch("BEGIN")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+
+    let result = (|| -> Result<Vec<Value>, (StatusCode, String)> {
+        let mut created = Vec::new();
+        for node in nodes {
+            insert_outline_tree(&db, &work_id, node, None, &mut created)?;
+        }
+        Ok(created)
+    })();
+
+    match result {
+        Ok(created) => {
+            db.execute_batch("COMMIT")
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+            Ok(Json(json!({ "created": created.len(), "nodes": created })))
+        }
+        Err(e) => {
+            let _ = db.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
+/// 递归插入大纲子树；children 与父节点同批创建（parent_id 直接引用新 id），任一失败整体回滚
+fn insert_outline_tree(
+    db: &Connection,
+    work_id: &str,
+    node: &Value,
+    parent_id: Option<&str>,
+    created: &mut Vec<Value>,
+) -> Result<(), (StatusCode, String)> {
+    let title = node["title"]
+        .as_str()
+        .ok_or((StatusCode::BAD_REQUEST, "批内节点 title 必填".into()))?
+        .to_string();
+    let description = node["description"].as_str().unwrap_or("").to_string();
+    // 节点自带 parentId 优先（挂到已有节点），否则挂到上级 children 的父节点
+    let pid = node["parentId"]
+        .as_str()
+        .map(|s| s.to_string())
+        .or_else(|| parent_id.map(|s| s.to_string()));
+    let default_type = if pid.is_some() { "scene" } else { "act" };
+    let node_type = node["type"].as_str().unwrap_or(default_type).to_string();
+    if !valid_outline_type(&node_type) {
+        return Err((StatusCode::BAD_REQUEST, "type 仅支持 act/scene/event".into()));
+    }
+    if let Some(p) = pid.as_deref() {
+        // 同批新建的父节点直接放行，其余校验存在性
+        if !created.iter().any(|c| c["id"].as_str() == Some(p)) {
+            ensure_parent_exists(db, work_id, p)?;
+        }
+    }
+    let order = match node["order"].as_i64() {
+        Some(o) => o,
+        None => next_outline_order(db, work_id, pid.as_deref())
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?,
+    };
+
+    let id = uuid();
+    let ts = now();
+    db.execute(
+        "INSERT INTO outline_nodes (id, work_id, parent_id, title, description, \"order\", type, created_at, updated_at, deleted) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, 0)",
+        rusqlite::params![id, work_id, pid, title, description, order, node_type, ts],
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{}", e)))?;
+    created.push(json!({ "id": id, "title": title, "parentId": pid, "order": order, "type": node_type }));
+
+    if let Some(children) = node["children"].as_array() {
+        for child in children {
+            insert_outline_tree(db, work_id, child, Some(&id), created)?;
+        }
+    }
+    Ok(())
 }
 
 async fn get_characters(
