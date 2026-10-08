@@ -72,6 +72,11 @@ pub fn run() {
 
         // ========== 第三步：初始化插件 ==========
 
+        // updater 插件：应用内自动更新（配合 GitHub Releases）
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // process 插件：更新后重启
+        .plugin(tauri_plugin_process::init())
+
         // clipboard 插件：剪贴板读写（投递复制，无 WebView 权限弹窗）
         .plugin(tauri_plugin_clipboard_manager::init())
 

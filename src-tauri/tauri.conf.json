@@ -31,7 +31,8 @@
         ],
         "displayLanguageSelector": false
       }
-    }
+    },
+    "createUpdaterArtifacts": true
   },
   "app": {
     "windows": [
@@ -52,6 +53,14 @@
       "csp": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: asset: http://asset.localhost blob:; font-src 'self' data:; connect-src 'self' ws://localhost:* http://localhost:* http://asset.localhost; media-src 'self' asset: http://asset.localhost; object-src 'none'; frame-src 'none';",
       "capabilities": [
         "default"
+      ]
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERGNTRBMEQzMTIwQUYwMjYKUldRbThBb1MwNkJVMzZ1TFNEVHRYMm5KdTNzQ3RXZkJ0WG1KTi9tZ1dFNzRYQ09Ub2VFTWFUNzkK",
+      "endpoints": [
+        "https://github.com/decade-afk/Creative-Studio/releases/latest/download/latest.json"
       ]
     }
   }

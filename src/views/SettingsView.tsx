@@ -11,7 +11,7 @@
  * 7. 关于信息 - 显示应用版本和相关信息
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { ask, message } from '@tauri-apps/plugin-dialog';
 import { useToast } from '../components/Toast';
@@ -1340,10 +1340,15 @@ function AboutTab() {
       <div className="text-center mb-10">
         <div className="text-6xl mb-4">🎬</div>
         <h3 className="text-2xl font-bold text-on-surface mb-2">Creative Studio</h3>
-        <p className="text-sm text-on-surface-secondary mb-6">版本 0.1.0 Beta</p>
+        <p className="text-sm text-on-surface-secondary mb-6">版本 0.3.0</p>
         <p className="text-sm text-on-surface-secondary max-w-md mx-auto mb-8">
           专业创作工作室，支持剧本创作、大纲管理、分镜生成等功能
         </p>
+      </div>
+
+      {/* 软件更新 */}
+      <div className="max-w-2xl mx-auto mb-6">
+        <UpdateSection />
       </div>
 
       <div className="space-y-6 max-w-2xl mx-auto">
@@ -1520,6 +1525,108 @@ function StorageTab({ onNotify }: { onNotify: (msg: string, type?: 'success' | '
         <p>· 迁移包含：creative-studio.db（数据库）、backups/（备份）、assets/（素材）</p>
         <p>· 迁移后建议重启应用，让所有组件加载新路径</p>
       </div>
+    </div>
+  );
+}
+
+// ========== 软件更新区块 ==========
+function UpdateSection() {
+  const [state, setState] = useState<'idle' | 'checking' | 'available' | 'uptodate' | 'downloading' | 'ready'>('idle');
+  const [newVersion, setNewVersion] = useState('');
+  const [progress, setProgress] = useState({ received: 0, total: 0 });
+  const updateRef = useRef<any>(null);
+
+  const handleCheck = async () => {
+    setState('checking');
+    const { checkForUpdates } = await import('../services/updateService');
+    const result = await checkForUpdates();
+    if (result.available && result.update) {
+      updateRef.current = result.update;
+      setNewVersion(result.version || '');
+      setState('available');
+    } else {
+      setState('uptodate');
+    }
+  };
+
+  const handleInstall = async () => {
+    if (!updateRef.current) return;
+    setState('downloading');
+    try {
+      const { downloadAndInstall } = await import('../services/updateService');
+      await downloadAndInstall(updateRef.current, (received, total) => {
+        setProgress({ received, total: total || 0 });
+      });
+      // relaunch 会重启应用，这里不会走到
+      setState('ready');
+    } catch {
+      setState('idle');
+    }
+  };
+
+  const openReleases = async () => {
+    const { openReleasesPage } = await import('../services/updateService');
+    await openReleasesPage().catch(() => undefined);
+  };
+
+  const pct = progress.total > 0 ? Math.round((progress.received / progress.total) * 100) : 0;
+
+  return (
+    <div className="p-4 bg-surface-secondary rounded-lg border border-outline">
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-sm font-semibold text-on-surface">🔄 软件更新</h4>
+        <button
+          onClick={openReleases}
+          className="text-xs text-primary-600 hover:underline"
+        >
+          更新日志 / 手动下载
+        </button>
+      </div>
+
+      {state === 'idle' && (
+        <button
+          onClick={handleCheck}
+          className="px-4 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+        >
+          检查更新
+        </button>
+      )}
+
+      {state === 'checking' && <p className="text-sm text-on-surface-secondary">正在检查…</p>}
+
+      {state === 'uptodate' && (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-green-600 dark:text-green-400">✓ 已是最新版本</span>
+          <button onClick={handleCheck} className="text-xs text-on-surface-secondary hover:text-on-surface">再查一次</button>
+        </div>
+      )}
+
+      {state === 'available' && (
+        <div className="space-y-3">
+          <p className="text-sm text-on-surface">
+            发现新版本 <span className="font-semibold text-primary-600">v{newVersion}</span>
+          </p>
+          <button
+            onClick={handleInstall}
+            className="px-4 py-2 text-sm rounded-lg bg-primary-600 text-white hover:bg-primary-700"
+          >
+            立即更新（下载并重启）
+          </button>
+        </div>
+      )}
+
+      {state === 'downloading' && (
+        <div className="space-y-2">
+          <p className="text-sm text-on-surface-secondary">下载中… {pct}%</p>
+          <div className="w-full h-2 bg-surface-tertiary rounded-full overflow-hidden">
+            <div className="h-full bg-primary-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+          </div>
+        </div>
+      )}
+
+      <p className="mt-3 text-xs text-on-surface-secondary">
+        更新包经签名校验后自动安装；若提示检查失败或无签名，可点右上角手动下载安装
+      </p>
     </div>
   );
 }

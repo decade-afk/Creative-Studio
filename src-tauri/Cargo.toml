@@ -59,3 +59,5 @@ tauri-plugin-clipboard-manager = "2.4.1"
 axum = "0.8.9"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tokio = { version = "1.53.2", features = ["net", "rt"] }
+tauri-plugin-updater = "2.13.2"
+tauri-plugin-process = "2.4.0"
