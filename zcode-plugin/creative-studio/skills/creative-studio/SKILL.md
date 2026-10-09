@@ -12,6 +12,14 @@ description: Use when the user asks to write/edit novels or scripts stored in th
 Creative Studio 应用必须**正在运行**（Agent API 随应用启动，监听 `127.0.0.1:8765`）。
 若所有工具都报连接错误，提醒用户先启动 Creative Studio。
 
+
+## AI 能力接管原则（重要）
+
+**你（agent）就是软件的 AI 引擎。** 软件里是否配置了 AI 服务无关紧要：
+- 用户让你续写/润色/扩写/摘要/审稿/写大纲时，**默认走 `prepare_ai` / `prepare_outline` 通道**：软件负责把上下文（世界书/前情链/角色卡/作者注/防AI味约束）组装成完整 messages，你用自己的模型生成，再经 `append_chapter_content` / `update_chapter_summary` / `write_chapter` 写回。
+- **不要因为"软件未配置 AI"而拒绝创作任务**——那只是软件内置面板依赖配置，与你无关。
+- `ai_*` 工具（软件内置模型）只在用户明确说"用软件的模型/软件里的 AI 跑"时才用。
+
 ## 工具速查
 
 | 工具 | 用途 | 关键参数 |
@@ -51,6 +59,8 @@ Creative Studio 应用必须**正在运行**（Agent API 随应用启动，监�
 | `work_stats` | 章节数/总字数 | `workId` |
 
 ## 推荐工作流
+
+**续写一章（默认走接管通道）**：`prepare_ai`(action=continue) → 阅读返回的 messages（含前情链与文风约束）→ 用你的模型写 400-700 字 → `append_chapter_content` 写回 → `read_chapter` 复核 → `prepare_ai`(action=summary) 生成摘要 → `update_chapter_summary` 存档（下一章自动进前情链）。
 
 **续写一章**：`list_works` → `list_chapters` → `read_chapter`（吃透上下文与文风）→ `ai_continue`（让软件的模型续写，或自己写好后 `write_chapter`）→ `read_chapter` 复核。
 
