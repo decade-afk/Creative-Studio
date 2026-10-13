@@ -37,7 +37,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { getCurrentWindow, LogicalSize, LogicalPosition } from '@tauri-apps/api/window';
 import TitleBar from './components/TitleBar';
 import AppNavigation from './components/AppNavigation';
 import WriterView from './views/WriterView';
@@ -275,22 +274,7 @@ function App() {
           await updateConfig({ isFirstLaunch: false });
         }
 
-        // 恢复上次窗口状态（位置/尺寸/最大化）
-        if (config.window.rememberSize) {
-          try {
-            const appWindow = getCurrentWindow();
-            if (config.window.maximized) {
-              await appWindow.maximize();
-            } else if (config.window.lastSize) {
-              await appWindow.setSize(new LogicalSize(config.window.lastSize.width, config.window.lastSize.height));
-              if (config.window.lastPosition) {
-                await appWindow.setPosition(new LogicalPosition(config.window.lastPosition.x, config.window.lastPosition.y));
-              }
-            }
-          } catch (error) {
-            console.warn('⚠️ 恢复窗口状态失败:', error);
-          }
-        }
+        // 窗口状态恢复由 Rust 侧 tauri-plugin-window-state 在窗口创建时自动完成
 
         await startAutoBackupScheduler();
       } catch (error) {
@@ -305,56 +289,9 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /**
-   * 窗口关闭时保存状态（位置/尺寸/最大化）
-   * 拦截关闭请求：先写配置再销毁窗口；最大化时只记标志
-   */
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
-
-    (async () => {
-      try {
-        const appWindow = getCurrentWindow();
-        unlisten = await appWindow.onCloseRequested(async (event) => {
-          event.preventDefault();
-          try {
-            const config = await loadConfig();
-            if (config.window.rememberSize) {
-              const maximized = await appWindow.isMaximized();
-              if (maximized) {
-                await updateConfig({ window: { ...config.window, maximized: true } });
-              } else {
-                const size = await appWindow.innerSize();
-                const position = await appWindow.outerPosition();
-                const scale = await appWindow.scaleFactor();
-                await updateConfig({
-                  window: {
-                    ...config.window,
-                    maximized: false,
-                    lastSize: { width: Math.round(size.width / scale), height: Math.round(size.height / scale) },
-                    lastPosition: { x: Math.round(position.x / scale), y: Math.round(position.y / scale) },
-                  },
-                });
-              }
-            }
-          } catch (error) {
-            console.warn('⚠️ 保存窗口状态失败:', error);
-          } finally {
-            await appWindow.destroy();
-          }
-        });
-        if (disposed) unlisten();
-      } catch {
-        // 非 Tauri 环境忽略
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, []);
+  // 窗口尺寸/位置/最大化的保存与恢复已由 Rust 侧 tauri-plugin-window-state 接管
+  // （外框口径一致 + DPI 正确处理；旧实现的 innerSize 存、setSize 还原会让
+  //  窗口每次重启矮掉一个标题栏，已移除）
 
   // ==========================================================================
   // 事件处理函数

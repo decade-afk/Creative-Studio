@@ -64,7 +64,45 @@ pub fn run() {
 
     tracing::info!("🔨 构建 Tauri 应用...");
 
+    // 窗口状态持久化开关：config.json 的 window.rememberSize（默认开）
+    // 关闭时跳过 window-state 插件注册，窗口保持 tauri.conf.json 的默认尺寸
+    fn app_data_dir_for_config() -> std::path::PathBuf {
+        std::env::var("APPDATA")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+            .join("com.creativestudio.desktop")
+    }
+    let remember_size = std::fs::read_to_string(app_data_dir_for_config().join("config.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|cfg| cfg["window"]["rememberSize"].as_bool())
+        .unwrap_or(true);
+    tracing::info!("窗口状态记忆: {}", if remember_size { "开" } else { "关" });
+
     tauri::Builder::default()
+        // 单实例：重复启动（dev/安装版同标识）时聚焦已有窗口，而非静默失败
+        // 文档要求此插件必须最先注册
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            use tauri::Manager;
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
+        // window-state 插件：窗口尺寸/位置/最大化持久化（外框口径，正确处理 DPI）
+        // 注意必须在构建链上注册——setup 里运行时注册会丢失几何捕获，状态文件存不上
+        // 只接管 SIZE/POSITION/MAXIMIZED：装饰与可见性的捕获值不可靠，不恢复
+        .plugin({
+            use tauri_plugin_window_state::StateFlags;
+            let flags = StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED;
+            let ws = tauri_plugin_window_state::Builder::default().with_state_flags(flags);
+            if remember_size {
+                ws.build()
+            } else {
+                // 关闭"记住窗口"：只跳过恢复，保存无害
+                ws.skip_initial_state("main").build()
+            }
+        })
         // Agent API：应用就绪后启动本地 REST 服务（供外部 AI Agent 调用）
         .setup(|app| {
             agent_api::start(app.handle());
